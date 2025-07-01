@@ -1,4 +1,10 @@
-from main import run_bot
+# В runner.py добавьте постоянные пинги
+import requests
+import threading
 
-if __name__ == "__main__":
-    run_bot()
+def keep_alive():
+    while True:
+        requests.get("https://aibot-1-2wft.onrender.com")
+        time.sleep(300)  # Пинг каждые 5 минут
+
+threading.Thread(target=keep_alive, daemon=True).start()
