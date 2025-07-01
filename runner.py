@@ -1,76 +1,69 @@
 import time
 import threading
-import requests
 from flask import Flask
-from main import bot, logger, TEXT_GENERATION_URL
+from main import bot, logger, user_context
+from datetime import datetime
 
 app = Flask(__name__)
 
 # Конфигурация
-PING_INTERVAL = 300  # 5 минут
-API_RETRY_DELAY = 2  # Задержка между запросами к API
+PORT = 8080
+CHECK_INTERVAL = 60  # Проверка каждую минуту
 
 @app.route('/')
 def health_check():
-    return "Bot is running", 200
+    active_users = sum(1 for ctx in user_context.values() 
+                     if time.time() - ctx['last_interaction'] < 3600)
+    return f"Bot Status: OK | Active Users: {active_users}", 200
 
-def keep_alive():
-    """Периодический пинг для предотвращения сна"""
+def run_bot():
+    """Основная функция запуска бота с улучшенной обработкой ошибок"""
     while True:
         try:
-            requests.get("https://text.pollinations.ai", timeout=5)
-            logger.info("API health check: OK")
-        except Exception as e:
-            logger.warning(f"API health check failed: {str(e)}")
-        time.sleep(PING_INTERVAL)
-
-def api_available():
-    """Проверка доступности API"""
-    try:
-        test_prompt = {"model":"gpt-3.5-turbo","messages":[{"role":"user","content":"test"}]}
-        response = requests.post(TEXT_GENERATION_URL, json=test_prompt, timeout=10)
-        return response.status_code == 200
-    except:
-        return False
-
-def run_bot_safely():
-    """Безопасный запуск бота с обработкой ошибок"""
-    while True:
-        try:
-            # Очистка предыдущих соединений
-            bot.remove_webhook()
-            time.sleep(1)
+            logger.info("Initializing bot...")
             
-            # Проверка API перед запуском
-            if not api_available():
-                logger.error("API недоступен, задержка перед запуском")
-                time.sleep(30)
-                continue
-                
-            logger.info("Starting bot polling...")
+            # 1. Очистка предыдущих сессий
+            bot.remove_webhook()
+            time.sleep(2)
+            
+            # 2. Настройка поллинга
             bot.infinity_polling(
                 none_stop=True,
-                interval=3,
+                interval=5,
                 timeout=30,
-                long_polling_timeout=20,
-                restart_on_change=True
+                long_polling_timeout=25,
+                allowed_updates=["message", "callback_query"]
             )
             
         except Exception as e:
-            logger.error(f"Bot crash: {str(e)}")
+            logger.error(f"Critical bot error: {str(e)}")
             time.sleep(15)
 
+def background_tasks():
+    """Фоновые проверки"""
+    while True:
+        try:
+            # Проверка активности пользователей
+            now = time.time()
+            for user_id, ctx in list(user_context.items()):
+                if now - ctx['last_interaction'] > 86400:  # 24 часа
+                    del user_context[user_id]
+                    
+            time.sleep(CHECK_INTERVAL)
+        except Exception as e:
+            logger.error(f"Background task error: {str(e)}")
+            time.sleep(60)
+
 if __name__ == "__main__":
-    # Запуск фоновых процессов
-    threading.Thread(target=keep_alive, daemon=True).start()
+    # Запуск фоновых задач
+    threading.Thread(target=background_tasks, daemon=True).start()
     
-    # Запуск Flask в отдельном потоке
-    flask_thread = threading.Thread(
+    # Запуск Flask
+    threading.Thread(
         target=app.run,
-        kwargs={'host':'0.0.0.0','port':8080},
+        kwargs={'host':'0.0.0.0','port':PORT},
         daemon=True
-    )
-    flask_thread.start()
+    ).start()
     
     # Основной цикл бота
-    run_bot_safely()
+    run_bot()
