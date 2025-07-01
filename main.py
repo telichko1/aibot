@@ -739,13 +739,18 @@ for _ in range(8):
 
 # --- Вечный поллинг ---
 def run_bot():
-    logger.info("Starting bot...")
-    try:
-        bot.infinity_polling(none_stop=True, interval=1, timeout=30)
-    except Exception as e:
-        logger.error(f"Bot crashed: {e}. Restarting in 10 seconds...")
-        time.sleep(10)
-        run_bot()  # Автоперезапуск
+    # Явная очистка перед стартом
+    bot.remove_webhook()
+    time.sleep(3)
+    
+    # Настройка поллинга
+    bot.infinity_polling(
+        none_stop=True,
+        interval=5,  # Увеличенный интервал
+        timeout=30,
+        long_polling_timeout=10,
+        allowed_updates=["message", "callback_query"]
+    )
         
 if __name__ == "__main__":
     logger.info("Бот запущен")
