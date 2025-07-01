@@ -738,13 +738,7 @@ for _ in range(8):
     t.start()
 
 # --- Вечный поллинг ---
-def run_bot():
-    while True:
-        try:
-            bot.polling(none_stop=True, interval=1, timeout=30)
-        except Exception as e:
-            logger.error(f"Ошибка поллинга: {e}")
-            time.sleep(15)
+
 
 if __name__ == "__main__":
     logger.info("Бот запущен")
