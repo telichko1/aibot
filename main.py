@@ -745,7 +745,7 @@ def run_bot():
     except Exception as e:
         logger.error(f"Bot crashed: {e}. Restarting in 10 seconds...")
         time.sleep(10)
-        run_bot()  # Рекурсивный перезапуск
+        run_bot()  # Автоперезапуск
         
 if __name__ == "__main__":
     logger.info("Бот запущен")
