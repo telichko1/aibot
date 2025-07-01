@@ -739,13 +739,14 @@ for _ in range(8):
 
 # --- Вечный поллинг ---
 def run_bot():
-    while True:
-        try:
-            bot.polling(none_stop=True, interval=1, timeout=30)
-        except Exception as e:
-            logger.error(f"Ошибка поллинга: {e}")
-            time.sleep(15)
-
+    logger.info("Starting bot...")
+    try:
+        bot.infinity_polling(none_stop=True, interval=1, timeout=30)
+    except Exception as e:
+        logger.error(f"Bot crashed: {e}. Restarting in 10 seconds...")
+        time.sleep(10)
+        run_bot()  # Рекурсивный перезапуск
+        
 if __name__ == "__main__":
     logger.info("Бот запущен")
     run_bot()
