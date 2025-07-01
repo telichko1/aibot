@@ -360,50 +360,57 @@ def typing_effect(chat_id, message_id, full_text, user_id):
 
 def generate_ai_response(user_id, prompt):
     ctx = user_context[user_id]
-    headers = {
-        "Content-Type": "application/json",
-        "User-Agent": "TelegramAI/1.0"
+    messages = []
+    
+    # Усиленный промпт для программиста
+    if ctx["assistant"] == "programmer":
+        prompt = f"{prompt}\n\nПожалуйста, предоставь полный работающий код с комментариями. Убедись, что код: 1. Корректно оформлен в markdown-блоки 2. Не содержит placeholder'ов 3. Решает поставленную задачу полностью"
+    
+    # Добавляем промпт выбранного ассистента
+    assistant_prompt = ASSISTANT_PROMPTS.get(ctx["assistant"], ASSISTANT_PROMPTS["standard"])
+    messages.append({"role": "system", "content": assistant_prompt})
+    
+    # Добавляем историю
+    for i, msg in enumerate(ctx["history"]):
+        role = "user" if i % 2 == 0 else "assistant"
+        messages.append({"role": role, "content": msg})
+    
+    messages.append({"role": "user", "content": prompt})
+    
+    payload = {
+        "model": ctx["model"],
+        "messages": messages,
+        "temperature": 0.7,
+        "max_tokens": 3000,
+        "top_p": 0.9
     }
-    
-    messages = [
-        {"role": "system", "content": ASSISTANT_PROMPTS[ctx["assistant"]]},
-        *[{"role": "user" if i % 2 == 0 else "assistant", "content": msg} 
-          for i, msg in enumerate(ctx["history"])],
-        {"role": "user", "content": prompt}
-    ]
-    
-    # Умная задержка на основе нагрузки
-    last_request_time = getattr(generate_ai_response, '_last_request', 0)
-    delay = max(1.5 - (time.time() - last_request_time), 0.3)
-    time.sleep(delay)
-    
-    for attempt in range(3):  # 3 попытки
-        try:
-            response = requests.post(
-                TEXT_GENERATION_URL,
-                json={
-                    "model": ctx["model"],
-                    "messages": messages,
-                    "temperature": 0.7
-                },
-                headers=headers,
-                timeout=20
-            )
+
+    try:
+        start_time = time.time()
+        response = requests.post(TEXT_GENERATION_URL, json=payload, timeout=180)
+        response.raise_for_status()
+        data = response.json()
+        
+        if "choices" in data and data["choices"]:
+            answer = data["choices"][0]["message"]["content"]
             
-            generate_ai_response._last_request = time.time()
+            # Проверяем наличие кода
+            if "```" not in answer and ctx["assistant"] == "programmer":
+                answer = "⚠️ Код не обнаружен. Пожалуйста, повторите запрос.\n\n" + answer
             
-            if response.status_code == 200:
-                result = response.json()
-                return result.get('choices', [{}])[0].get('message', {}).get('content', 'Пустой ответ API')
+            # Сохраняем в историю
+            ctx["history"].append(prompt)
+            ctx["history"].append(answer)
+            ctx["last_interaction"] = time.time()
             
-            logger.warning(f"Attempt {attempt+1}: API returned {response.status_code}")
-            time.sleep(2 ** attempt)  # Экспоненциальная задержка
-            
-        except Exception as e:
-            logger.error(f"Attempt {attempt+1} failed: {str(e)}")
-            time.sleep(3)
-    
-    return "⚠️ Сервис временно недоступен. Попробуйте позже."
+            # Форматируем и возвращаем
+            return safe_format(answer)
+        return "⚠️ Ошибка генерации ответа"
+    except requests.exceptions.Timeout:
+        return "⌛️ Превышено время ожидания ответа от сервера"
+    except Exception as e:
+        logger.error(f"Ошибка API: {e}")
+        return "⚠️ Ошибка сервера, попробуйте позже"
 
 # --- Обработчики команд ---
 @bot.message_handler(commands=['start', 'menu'])
@@ -732,19 +739,13 @@ for _ in range(8):
 
 # --- Вечный поллинг ---
 def run_bot():
-    # Явная очистка перед стартом
-    bot.remove_webhook()
-    time.sleep(3)
-    
-    # Настройка поллинга
-    bot.infinity_polling(
-        none_stop=True,
-        interval=5,  # Увеличенный интервал
-        timeout=30,
-        long_polling_timeout=10,
-        allowed_updates=["message", "callback_query"]
-    )
-        
+    while True:
+        try:
+            bot.polling(none_stop=True, interval=1, timeout=30)
+        except Exception as e:
+            logger.error(f"Ошибка поллинга: {e}")
+            time.sleep(15)
+
 if __name__ == "__main__":
     logger.info("Бот запущен")
     run_bot()
