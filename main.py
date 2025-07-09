@@ -2294,38 +2294,71 @@ async def clean_inactive_sessions():
         
         await save_db()
 
+Конфигурация
+RENDER_APP_URL = "https://aibot-plcn.onrender.com"
+PING_INTERVAL = 300  # 5 минут (минимальный интервал для бесплатного плана)
+
 async def run_bot():
-    # Загружаем базу данных
-    await load_db()
+    """Основная функция запуска бота"""
+    try:
+        # Инициализация
+        await load_db()
+        
+        bot_info = await bot.get_me()
+        logger.info(f"Bot @{bot_info.username} started")
+        
+        # Фоновые задачи
+        asyncio.create_task(auto_save_db())
+        asyncio.create_task(clean_inactive_sessions())
+        
+        # Очистка предыдущих обновлений
+        await bot.delete_webhook(drop_pending_updates=True)
+        
+        # Запуск бота
+        await dp.start_polling(bot, skip_updates=True)
+    except Exception as e:
+        logger.error(f"Bot crashed: {e}")
+        # Перезапуск через 30 секунд при ошибке
+        await asyncio.sleep(30)
+        asyncio.create_task(run_bot())
+
+async def self_pinger():
+    """Регулярные ping-запросы для предотвращения сна сервиса"""
+    while True:
+        try:
+            requests.get(RENDER_APP_URL, timeout=10)
+            logger.debug("Self-ping successful")
+        except Exception as e:
+            logger.warning(f"Self-ping failed: {e}")
+        await asyncio.sleep(PING_INTERVAL)
+
+@app.get("/")
+async def health_check():
+    """Endpoint для проверки работоспособности"""
+    return {
+        "status": "running",
+        "bot": "active",
+        "render": "keep-alive"
+    }
+
+@app.on_event("startup")
+async def startup():
+    """Запуск при старте приложения"""
+    # Запускаем бота в фоне
+    asyncio.create_task(run_bot())
     
-    # Получаем username бота
-    global BOT_USERNAME
-    bot_info = await bot.get_me()
-    BOT_USERNAME = bot_info.username
-    logger.info(f"Bot @{BOT_USERNAME} started")
-    
-    # Запускаем фоновые задачи
-    asyncio.create_task(auto_save_db())
-    asyncio.create_task(clean_inactive_sessions())
-    
-    # Удаляем все предыдущие обновления
-    await bot.delete_webhook(drop_pending_updates=True)
-    
-    # Запускаем бота
-    await dp.start_polling(bot, skip_updates=True)
+    # Запускаем self-pinger только на Render
+    if os.getenv("RENDER", "").lower() == "true":
+        asyncio.create_task(self_pinger())
 
 if __name__ == "__main__":
-    # Для Render.com нужно добавить FastAPI сервер
-    app = FastAPI()
-    
-    @app.get("/")
-    async def root():
-        return {"status": "ok"}
-    
-    @app.on_event("startup")
-    async def startup():
-        asyncio.create_task(run_bot())
-    
-    # Запускаем сервер на порту, который ожидает Render
     port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=port,
+        # Оптимизации для Render
+        workers=1,
+        loop="asyncio",
+        timeout_keep_alive=60
+    )
