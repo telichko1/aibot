@@ -1049,12 +1049,11 @@ async def handle_support(callback: CallbackQuery, user: User):
     )
 
 async def handle_referral(callback: CallbackQuery, user: User):
-    referral_link = f"https://t.me/{BOT_USERNAME}?start={user.referral_code}"
+    referral_link = f"https://t.me/@NeuroAlliance_bot?start={user.referral_code}"
     await safe_edit_message(
         callback,
         f"👥 <b>РЕФЕРАЛЬНАЯ СИСТЕМА</b>\n══════════════════\n"
         f"🔗 Ваша ссылка:\n{hcode(referral_link)}\n"
-        f"🔑 Код: {hcode(user.referral_code)}\n\n"
         f"💎 За приглашенного:\n"
         f"• Вы получаете: {REFERRAL_BONUS} ⭐\n"
         f"• Друг получает: {START_BALANCE_STARS//2} ⭐\n\n"
