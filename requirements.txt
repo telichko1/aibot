@@ -6,3 +6,4 @@ gunicorn==21.2.0
 uvicorn==0.29.0
 Flask
 gevent>=1.4
+fastapi
