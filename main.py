@@ -4,6 +4,7 @@ import aiohttp
 import asyncio
 import re
 import time
+import html
 import os
 import json
 import sys
@@ -2141,7 +2142,8 @@ async def send_welcome(message: Message):
     if ref_code and ref_code.startswith("REF") and not user.referral_used:
         await process_referral(user, ref_code)
     
-    welcome_text = (
+    
+welcome_text = (
     f"✨ <b>{html.escape(message.from_user.first_name)}, добро пожаловать в мир AI-творчества!</b>\n\n"
     
     "🚀 <b>Твои возможности:</b>\n"
@@ -2154,7 +2156,7 @@ async def send_welcome(message: Message):
     "<i>Используй для тестирования возможностей!</i>\n\n"
     
     "🔥 Создавай уникальный контент одним запросом!"
-    )
+)
     
     user.state = UserState.MAIN_MENU
     await message.answer(welcome_text, reply_markup=main_keyboard(user))
