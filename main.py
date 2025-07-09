@@ -2267,25 +2267,60 @@ async def pay_support_handler(message: Message):
         "Возврат средств возможен в течение 14 дней"
     )
 
-# ... (предыдущий код без изменений) ...
+# ... (предыдущий код без изменений до создания app) ...
 
-# ===================== ИНИЦИАЛИЗАЦИЯ FASTAPI =====================
-app = FastAPI()  # Добавляем создание приложения FastAPI
+app = FastAPI()
 
-# ===================== ENDPOINT ДЛЯ ПРОВЕРКИ РАБОТОСПОСОБНОСТИ =====================
+# ===================== LIFESPAN HANDLER =====================
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Управление жизненным циклом приложения"""
+    # Запуск при старте
+    asyncio.create_task(run_bot())
+    asyncio.create_task(self_pinger())
+    yield
+    # Остановка при завершении
+    await bot.session.close()
+
+app = FastAPI(lifespan=lifespan)
+
+# ===================== ENDPOINT ДЛЯ ПРОВЕРКИ =====================
 @app.get("/")
 async def health_check():
-    """Endpoint для проверки работоспособности"""
     return {
         "status": "ok",
         "bot": "active",
         "render": "keep-alive"
     }
 
-# ===================== ФОНОВЫЕ ЗАДАЧИ =====================
-# ... (функции auto_save_db, clean_inactive_sessions остаются без изменений) ...
+# ===================== ОПРЕДЕЛЕНИЕ RUN_BOT =====================
+async def run_bot():
+    """Основная функция запуска бота"""
+    try:
+        # Инициализация
+        await load_db()
+        
+        bot_info = await bot.get_me()
+        logger.info(f"Bot @{bot_info.username} started")
+        
+        # Фоновые задачи
+        asyncio.create_task(auto_save_db())
+        asyncio.create_task(clean_inactive_sessions())
+        
+        # Очистка предыдущих обновлений
+        await bot.delete_webhook(drop_pending_updates=True)
+        
+        # Запуск бота
+        await dp.start_polling(bot, skip_updates=True)
+    except Exception as e:
+        logger.error(f"Bot crashed: {e}")
+        # Перезапуск через 30 секунд при ошибке
+        await asyncio.sleep(30)
+        asyncio.create_task(run_bot())
 
-# Добавленная функция для предотвращения сна
+# ===================== САМОПИНГ =====================
 async def self_pinger():
     """Регулярные ping-запросы для предотвращения сна сервиса"""
     RENDER_APP_URL = "https://aibot-plcn.onrender.com"
@@ -2296,8 +2331,9 @@ async def self_pinger():
                     logger.info(f"Self-ping status: {response.status}")
         except Exception as e:
             logger.error(f"Self-ping failed: {str(e)}")
-        # Интервал 10 минут (меньше 15-минутного таймаута Render)
-        await asyncio.sleep(600)
+        await asyncio.sleep(600)  # 10 минут
+
+# ... (остальной код без изменений) ...
 
 @app.on_event("startup")
 async def startup():
