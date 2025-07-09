@@ -2313,6 +2313,7 @@ if __name__ == '__main__':
 # ... (весь ваш текущий код main.py до конца) ...
 
 # ===================== WEB SERVER FOR RENDER =====================
+# ===================== WEB SERVER FOR RENDER =====================
 from flask import Flask
 import threading
 import os
