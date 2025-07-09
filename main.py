@@ -2269,48 +2269,33 @@ async def pay_support_handler(message: Message):
 
 # ... (предыдущий код без изменений) ...
 
-# ===================== ФОНОВЫЕ ЗАДАЧИ =====================
-async def auto_save_db():
-    """Автоматическое сохранение базы данных каждые 5 минут"""
-    while True:
-        await asyncio.sleep(300)
-        if any(user._modified for user in users_db.values()):
-            await save_db()
-            logger.info("Database auto-saved")
+# ===================== ИНИЦИАЛИЗАЦИЯ FASTAPI =====================
+app = FastAPI()  # Добавляем создание приложения FastAPI
 
-async def clean_inactive_sessions():
-    """Очистка неактивных сессий"""
-    while True:
-        await asyncio.sleep(3600)  # Каждый час
-        current_time = time.time()
-        inactive_users = []
-        
-        for user_id, user in users_db.items():
-            if current_time - user.last_interaction > SESSION_TIMEOUT:
-                inactive_users.append(user_id)
-        
-        for user_id in inactive_users:
-            if user_id != ADMIN_ID:  # Не удаляем админа
-                del users_db[user_id]
-                logger.info(f"Cleaned inactive session: {user_id}")
-        
-        await save_db()
+# ===================== ENDPOINT ДЛЯ ПРОВЕРКИ РАБОТОСПОСОБНОСТИ =====================
+@app.get("/")
+async def health_check():
+    """Endpoint для проверки работоспособности"""
+    return {
+        "status": "ok",
+        "bot": "active",
+        "render": "keep-alive"
+    }
+
+# ===================== ФОНОВЫЕ ЗАДАЧИ =====================
+# ... (функции auto_save_db, clean_inactive_sessions остаются без изменений) ...
 
 # Добавленная функция для предотвращения сна
 async def self_pinger():
     """Регулярные ping-запросы для предотвращения сна сервиса"""
+    RENDER_APP_URL = "https://aibot-plcn.onrender.com"
     while True:
         try:
-            # URL вашего приложения на Render
-            RENDER_APP_URL = "https://aibot-plcn.onrender.com"
-            
-            # Используем aiohttp для асинхронного запроса
             async with aiohttp.ClientSession() as session:
                 async with session.get(RENDER_APP_URL, timeout=10) as response:
                     logger.info(f"Self-ping status: {response.status}")
         except Exception as e:
             logger.error(f"Self-ping failed: {str(e)}")
-        
         # Интервал 10 минут (меньше 15-минутного таймаута Render)
         await asyncio.sleep(600)
 
@@ -2320,16 +2305,15 @@ async def startup():
     # Запускаем бота в фоне
     asyncio.create_task(run_bot())
     
-    # Запускаем self-pinger
+    # Запускаем self-pinger только на Render
     asyncio.create_task(self_pinger())
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(
-        app,
+        app,  # Используем созданное приложение
         host="0.0.0.0",
         port=port,
-        # Оптимизации для Render
         workers=1,
         loop="asyncio",
         timeout_keep_alive=60
