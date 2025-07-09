@@ -1039,8 +1039,8 @@ async def handle_support(callback: CallbackQuery, user: User):
         callback,
         "🆘 <b>ПОДДЕРЖКА</b>\n══════════════════\n"
         f"• По вопросам: {PAYMENT_ADMIN}\n"
-        "• По оплате: @payment_support_bot\n"
-        "• Предложения: @feedback_bot\n\n"
+        "• По оплате: @telichko_a\n"
+        "• Предложения: @telichko_a\n\n"
         "Мы отвечаем в течение 24 часов.\n"
         "══════════════════",
         reply_markup=home_keyboard()
