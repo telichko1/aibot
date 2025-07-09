@@ -2303,35 +2303,13 @@ async def run_bot():
     
     # ... (all your existing code until the end) ...
 
-async def main():
-    # Initialize and run background tasks
-    asyncio.create_task(auto_save_db())
-    asyncio.create_task(clean_inactive_sessions())
-    
-    # Load database
-    await load_db()
-    
-    # Get bot username
-    global BOT_USERNAME
-    bot_info = await bot.get_me()
-    BOT_USERNAME = bot_info.username
-    
-    # Start the bot
-    await dp.start_polling(bot)
+import uvicorn
+
+async def run():
+    config = uvicorn.Config("main:app", host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
+    server = uvicorn.Server(config)
+    await server.serve()
 
 if __name__ == "__main__":
-    # Create FastAPI app
-    app = FastAPI()
-    
-    @app.get("/")
-    async def root():
-        return {"status": "Bot is running"}
-    
-    # Start both FastAPI and bot
-    async def run():
-        await asyncio.gather(
-            uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000))),
-            main()
-        )
-    
+    import asyncio
     asyncio.run(run())
