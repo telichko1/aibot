@@ -2144,19 +2144,15 @@ async def send_welcome(message: Message):
         await process_referral(user, ref_code)
     
     welcome_text = (
-    f"✨ <b>{html.quote(message.from_user.first_name}, добро пожаловать в мир AI-творчества!</b>\n\n"
-    
-    "🚀 <b>Твои возможности:</b>\n"
-    "▫️ <b>🎨 Генерация изображений</b> - визуализирую любые идеи\n"
-    "▫️ <b>📝 Текстовый контент + код</b> - пишу тексты, статьи, скрипты и программы\n\n"
-    
-    f"💎 <b>Премиум-доступ</b> - безлимитная генерация контента\n\n"
-    
-    f"🎁 <b>Стартовый бонус:</b> {START_BALANCE_STARS} ⭐\n"
-    "<i>Используй для тестирования возможностей!</i>\n\n"
-    
-    "🔥 Создавай уникальный контент одним запросом!"
-)
+        f"✨ <b>Добро пожаловать, {html.quote(message.from_user.first_name)}!</b> ✨\n"
+        f"══════════════════\n"
+        "🚀 Ваш AI-ассистент для генерации контента:\n\n"
+        "🎨 <b>Генерация изображений</b> - платно звездами\n"
+        "📝 <b>Текстовый контент</b> - платно токенами\n"
+        "💎 <b>Премиум</b> - безлимитная генерация изображений\n\n"
+        f"🆓 <i>Стартовый баланс: {START_BALANCE_STARS} ⭐ + {START_BALANCE_TOKENS} 🔢</i>\n"
+        f"══════════════════"
+    )
     user.state = UserState.MAIN_MENU
     await message.answer(welcome_text, reply_markup=main_keyboard(user))
     await save_db()
