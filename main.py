@@ -2310,3 +2310,33 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
+# ... (весь ваш текущий код main.py до конца) ...
+
+# ===================== WEB SERVER FOR RENDER =====================
+from flask import Flask
+import threading
+import os
+
+app = Flask(__name__)
+
+@app.route('/')
+def health_check():
+    # Проверка активности пользователей
+    active_users = sum(
+        1 for user in users_db.values() 
+        if time.time() - user.last_interaction < 3600
+    )
+    return f"🤖 Bot is running | Active users: {active_users}", 200
+
+def run_web_server():
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+
+# ===================== MAIN LAUNCH =====================
+if __name__ == '__main__':
+    # Запускаем веб-сервер в отдельном потоке
+    server_thread = threading.Thread(target=run_web_server, daemon=True)
+    server_thread.start()
+    
+    # Запускаем бота в основном потоке
+    asyncio.run(main())
