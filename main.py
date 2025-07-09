@@ -2292,86 +2292,14 @@ async def clean_inactive_sessions():
         
         await save_db()
 
-# ===================== ЗАПУСК БОТА =====================
-# ===================== WEB SERVER FOR RENDER =====================
-from flask import Flask, request
-import threading
-import os
-import time
+def run_flask():
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)))
 
-app = Flask(__name__)
+async def run_bot():
+    await dp.start_polling(bot)
 
-# Счетчик активных пользователей
-active_users = 0
-last_activity = time.time()
-
-@app.route('/')
-def health_check():
-    global active_users, last_activity
-    return {
-        "status": "running",
-        "bot": "NeuroAlliance_bot",
-        "active_users": active_users,
-        "last_activity": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(last_activity)),
-        "uptime": int(time.time() - start_time)
-    }, 200
-
-@app.route('/webhook', methods=['POST'])
-def webhook_handler():
-    # Здесь можно добавить обработку вебхуков
-    return {"status": "received"}, 200
-
-def run_web_server():
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port)
-
-# ===================== БЕСКОНЕЧНЫЙ ЦИКЛ РАБОТЫ БОТА =====================
-import sys
-
-async def run_bot_forever():
-    global active_users, last_activity
-    
-    while True:
-        try:
-            logger.info("Starting bot...")
-            bot_info = await bot.get_me()
-            BOT_USERNAME = bot_info.username
-            logger.info(f"Bot username: @{BOT_USERNAME}")
-            
-            await load_db()
-            await save_db()  # Гарантируем сохранение при старте
-            
-            # Запускаем фоновые задачи
-            asyncio.create_task(auto_save_db())
-            asyncio.create_task(clean_inactive_sessions())
-            
-            # Основной цикл работы бота
-            await dp.start_polling(bot)
-            
-        except Exception as e:
-            logger.critical(f"CRITICAL ERROR: {type(e).__name__} - {str(e)}")
-            logger.exception("Bot crashed, restarting in 10 seconds...")
-            
-            # Увеличиваем счетчик активных пользователей при перезапуске
-            active_users = max(1, active_users)
-            last_activity = time.time()
-            
-            # Сохраняем базу перед перезапуском
-            try:
-                await save_db()
-            except:
-                pass
-            
-            await asyncio.sleep(10)
-
-# ===================== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ =====================
-start_time = time.time()
-
-# ===================== ЗАПУСК ПРИЛОЖЕНИЯ =====================
 if __name__ == '__main__':
-    # Запускаем веб-сервер в отдельном потоке
-    server_thread = threading.Thread(target=run_web_server, daemon=True)
-    server_thread.start()
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
     
-    # Запускаем бота в основном потоке с автовосстановлением
-    asyncio.run(run_bot_forever())
+    asyncio.run(run_bot())
