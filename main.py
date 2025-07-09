@@ -8,6 +8,8 @@ import os
 import json
 import sys
 import datetime
+from fastapi import FastAPI
+import uvicorn
 from aiogram import Bot, Dispatcher, types, F, html
 from aiogram.filters import Command
 from aiogram.types import (
