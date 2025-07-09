@@ -2266,34 +2266,46 @@ async def pay_support_handler(message: Message):
         "Поддержка по платежам: @payment_admin\n\n"
         "Возврат средств возможен в течение 14 дней"
     )
-
 # ... (предыдущий код без изменений до создания app) ...
 
-app = FastAPI()
+# ===================== ФОНОВЫЕ ЗАДАЧИ =====================
+async def auto_save_db():
+    """Автоматическое сохранение базы данных каждые 5 минут"""
+    while True:
+        await asyncio.sleep(300)
+        if any(user._modified for user in users_db.values()):
+            await save_db()
+            logger.info("Database auto-saved")
 
-# ===================== LIFESPAN HANDLER =====================
-from contextlib import asynccontextmanager
+async def clean_inactive_sessions():
+    """Очистка неактивных сессий"""
+    while True:
+        await asyncio.sleep(3600)  # Каждый час
+        current_time = time.time()
+        inactive_users = []
+        
+        for user_id, user in users_db.items():
+            if current_time - user.last_interaction > SESSION_TIMEOUT:
+                inactive_users.append(user_id)
+        
+        for user_id in inactive_users:
+            if user_id != ADMIN_ID:  # Не удаляем админа
+                del users_db[user_id]
+                logger.info(f"Cleaned inactive session: {user_id}")
+        
+        await save_db()
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Управление жизненным циклом приложения"""
-    # Запуск при старте
-    asyncio.create_task(run_bot())
-    asyncio.create_task(self_pinger())
-    yield
-    # Остановка при завершении
-    await bot.session.close()
-
-app = FastAPI(lifespan=lifespan)
-
-# ===================== ENDPOINT ДЛЯ ПРОВЕРКИ =====================
-@app.get("/")
-async def health_check():
-    return {
-        "status": "ok",
-        "bot": "active",
-        "render": "keep-alive"
-    }
+async def self_pinger():
+    """Регулярные ping-запросы для предотвращения сна сервиса"""
+    RENDER_APP_URL = "https://aibot-plcn.onrender.com"
+    while True:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(RENDER_APP_URL, timeout=10) as response:
+                    logger.info(f"Self-ping status: {response.status}")
+        except Exception as e:
+            logger.error(f"Self-ping failed: {str(e)}")
+        await asyncio.sleep(600)  # 10 минут
 
 # ===================== ОПРЕДЕЛЕНИЕ RUN_BOT =====================
 async def run_bot():
@@ -2320,29 +2332,36 @@ async def run_bot():
         await asyncio.sleep(30)
         asyncio.create_task(run_bot())
 
-# ===================== САМОПИНГ =====================
-async def self_pinger():
-    """Регулярные ping-запросы для предотвращения сна сервиса"""
-    RENDER_APP_URL = "https://aibot-plcn.onrender.com"
-    while True:
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(RENDER_APP_URL, timeout=10) as response:
-                    logger.info(f"Self-ping status: {response.status}")
-        except Exception as e:
-            logger.error(f"Self-ping failed: {str(e)}")
-        await asyncio.sleep(600)  # 10 минут
+# ===================== LIFESPAN HANDLER =====================
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Управление жизненным циклом приложения"""
+    # Запуск при старте
+    asyncio.create_task(run_bot())
+    asyncio.create_task(self_pinger())
+    yield
+    # Остановка при завершении
+    # Закрываем сессию бота
+    await bot.session.close()
+
+app = FastAPI(lifespan=lifespan)
+
+# ===================== ENDPOINT ДЛЯ ПРОВЕРКИ =====================
+@app.get("/")
+async def health_check():
+    return {
+        "status": "ok",
+        "bot": "active",
+        "render": "keep-alive"
+    }
 
 # ... (остальной код без изменений) ...
 
-@app.on_event("startup")
-async def startup():
-    """Запуск при старте приложения"""
-    # Запускаем бота в фоне
-    asyncio.create_task(run_bot())
-    
-    # Запускаем self-pinger только на Render
-    asyncio.create_task(self_pinger())
+# Удаляем дублирующиеся определения run_bot и self_pinger
+
+# Удаляем блок с @app.on_event("startup"), потому что мы используем lifespan
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
