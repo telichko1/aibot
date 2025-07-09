@@ -1,6 +1,4 @@
-pyTelegramBotAPI==4.15.0
-requests==2.31.0
-python-dotenv==1.0.0
-python-dateutil==2.8.2
-flask==2.3.2
-gunicorn==21.2.0
+aiogram==3.0.0b7
+aiohttp
+requests
+python-dotenv
