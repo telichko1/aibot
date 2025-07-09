@@ -2294,22 +2294,22 @@ async def clean_inactive_sessions():
         
         await save_db()
 
-def run_flask():
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)))
-
-async def run_bot():
+async def run():
+    # Загружаем базу данных
+    await load_db()
+    
+    # Получаем username бота
+    global BOT_USERNAME
+    bot_info = await bot.get_me()
+    BOT_USERNAME = bot_info.username
+    
+    # Запускаем фоновые задачи
+    asyncio.create_task(auto_save_db())
+    asyncio.create_task(clean_inactive_sessions())
+    
+    # Запускаем бота
     await dp.start_polling(bot)
 
-    
-    # ... (all your existing code until the end) ...
-
-import uvicorn
-
-async def run():
-    config = uvicorn.Config("main:app", host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
-    server = uvicorn.Server(config)
-    await server.serve()
-
 if __name__ == "__main__":
-    import asyncio
+    # Запускаем основную асинхронную функцию
     asyncio.run(run())
