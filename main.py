@@ -2294,7 +2294,7 @@ async def clean_inactive_sessions():
         
         await save_db()
 
-async def run():
+async def run_bot():
     # Загружаем базу данных
     await load_db()
     
@@ -2302,14 +2302,30 @@ async def run():
     global BOT_USERNAME
     bot_info = await bot.get_me()
     BOT_USERNAME = bot_info.username
+    logger.info(f"Bot @{BOT_USERNAME} started")
     
     # Запускаем фоновые задачи
     asyncio.create_task(auto_save_db())
     asyncio.create_task(clean_inactive_sessions())
     
+    # Удаляем все предыдущие обновления
+    await bot.delete_webhook(drop_pending_updates=True)
+    
     # Запускаем бота
-    await dp.start_polling(bot)
+    await dp.start_polling(bot, skip_updates=True)
 
 if __name__ == "__main__":
-    # Запускаем основную асинхронную функцию
-    asyncio.run(run())
+    # Для Render.com нужно добавить FastAPI сервер
+    app = FastAPI()
+    
+    @app.get("/")
+    async def root():
+        return {"status": "ok"}
+    
+    @app.on_event("startup")
+    async def startup():
+        asyncio.create_task(run_bot())
+    
+    # Запускаем сервер на порту, который ожидает Render
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
