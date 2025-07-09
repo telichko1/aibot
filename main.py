@@ -2156,7 +2156,7 @@ welcome_text = (
     "<i>Используй для тестирования возможностей!</i>\n\n"
     
     "🔥 Создавай уникальный контент одним запросом!"
-)
+    )
     
     user.state = UserState.MAIN_MENU
     await message.answer(welcome_text, reply_markup=main_keyboard(user))
