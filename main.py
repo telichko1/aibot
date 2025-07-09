@@ -2267,6 +2267,8 @@ async def pay_support_handler(message: Message):
         "Возврат средств возможен в течение 14 дней"
     )
 
+# ... (предыдущий код без изменений) ...
+
 # ===================== ФОНОВЫЕ ЗАДАЧИ =====================
 async def auto_save_db():
     """Автоматическое сохранение базы данных каждые 5 минут"""
@@ -2294,52 +2296,23 @@ async def clean_inactive_sessions():
         
         await save_db()
 
-Конфигурация
-RENDER_APP_URL = "https://aibot-plcn.onrender.com"
-PING_INTERVAL = 300  # 5 минут (минимальный интервал для бесплатного плана)
-
-async def run_bot():
-    """Основная функция запуска бота"""
-    try:
-        # Инициализация
-        await load_db()
-        
-        bot_info = await bot.get_me()
-        logger.info(f"Bot @{bot_info.username} started")
-        
-        # Фоновые задачи
-        asyncio.create_task(auto_save_db())
-        asyncio.create_task(clean_inactive_sessions())
-        
-        # Очистка предыдущих обновлений
-        await bot.delete_webhook(drop_pending_updates=True)
-        
-        # Запуск бота
-        await dp.start_polling(bot, skip_updates=True)
-    except Exception as e:
-        logger.error(f"Bot crashed: {e}")
-        # Перезапуск через 30 секунд при ошибке
-        await asyncio.sleep(30)
-        asyncio.create_task(run_bot())
-
+# Добавленная функция для предотвращения сна
 async def self_pinger():
     """Регулярные ping-запросы для предотвращения сна сервиса"""
     while True:
         try:
-            requests.get(RENDER_APP_URL, timeout=10)
-            logger.debug("Self-ping successful")
+            # URL вашего приложения на Render
+            RENDER_APP_URL = "https://aibot-plcn.onrender.com"
+            
+            # Используем aiohttp для асинхронного запроса
+            async with aiohttp.ClientSession() as session:
+                async with session.get(RENDER_APP_URL, timeout=10) as response:
+                    logger.info(f"Self-ping status: {response.status}")
         except Exception as e:
-            logger.warning(f"Self-ping failed: {e}")
-        await asyncio.sleep(PING_INTERVAL)
-
-@app.get("/")
-async def health_check():
-    """Endpoint для проверки работоспособности"""
-    return {
-        "status": "running",
-        "bot": "active",
-        "render": "keep-alive"
-    }
+            logger.error(f"Self-ping failed: {str(e)}")
+        
+        # Интервал 10 минут (меньше 15-минутного таймаута Render)
+        await asyncio.sleep(600)
 
 @app.on_event("startup")
 async def startup():
@@ -2347,9 +2320,8 @@ async def startup():
     # Запускаем бота в фоне
     asyncio.create_task(run_bot())
     
-    # Запускаем self-pinger только на Render
-    if os.getenv("RENDER", "").lower() == "true":
-        asyncio.create_task(self_pinger())
+    # Запускаем self-pinger
+    asyncio.create_task(self_pinger())
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
