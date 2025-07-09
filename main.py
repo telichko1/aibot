@@ -2299,13 +2299,6 @@ def run_flask():
 
 async def run_bot():
     await dp.start_polling(bot)
-app = FastAPI()
 
-@app.get("/")
-async def health_check():
-    return {"status": "ok"}
-if __name__ == '__main__':
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
     
     asyncio.run(run_bot())
