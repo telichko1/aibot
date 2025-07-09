@@ -2105,7 +2105,8 @@ async def process_promo_code(user: User, promo_code: str, message: Message):
     user.mark_modified()
     await save_db()
 
-# ===================== ОСНОВНОЙ ОБРАБОТЧИК СООБЩЕНИЙ =====================
+# ===================== ОСНОВНОЙ ОБРАБОТЧИК СООБЩЕНИЙ ==================
+
 @dp.message(Command("start", "help"))
 async def send_welcome(message: Message):
     args = message.text.split()
