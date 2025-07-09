@@ -2150,7 +2150,8 @@ async def send_welcome(message: Message):
         "🎨 <b>Генерация изображений</b> - платно звездами\n"
         "📝 <b>Текстовый контент</b> - платно токенами\n"
         "💎 <b>Премиум</b> - безлимитная генерация изображений\n\n"
-        f"🆓 <i>Стартовый баланс: {START_BALANCE_STARS} ⭐ + {START_BALANCE_TOKENS} 🔢</i>\n"
+        f"🎁 <b>Стартовый бонус:</b> {START_BALANCE_STARS} ⭐\n"
+        "<i>Используй для тестирования возможностей!</i>\n\n"
         f"══════════════════"
     )
     user.state = UserState.MAIN_MENU
