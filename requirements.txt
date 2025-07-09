@@ -7,3 +7,4 @@ uvicorn==0.29.0
 Flask
 gevent>=1.4
 fastapi
+filelock>=3.0.0
