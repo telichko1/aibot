@@ -9,7 +9,8 @@ import os
 import json
 import sys
 import datetime
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
+from fastapi.responses import JSONResponse
 import uvicorn
 from aiogram import Bot, Dispatcher, types, F, html
 from aiogram.filters import Command
@@ -29,6 +30,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode, ChatMemberStatus
 from typing import Union, Optional, List, Dict, Any, Tuple
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, Gauge
 
 # ===================== КОНСТАНТЫ =====================
 API_TOKEN = "7965257689:AAGEiEit2zlc0hIQC0MiYAjAgclOw8DzuO4"
@@ -82,7 +84,35 @@ bot = Bot(
     default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
-# ===================== МОДЕЛИ ДАННЫХ =====================
+# Создаем метрики Prometheus
+USERS_TOTAL = Gauge('bot_users_total', 'Total registered users')
+IMAGES_GENERATED = Gauge('bot_images_generated', 'Total images generated')
+TEXTS_GENERATED = Gauge('bot_texts_generated', 'Total texts generated')
+AVATARS_GENERATED = Gauge('bot_avatars_generated', 'Total avatars generated')
+LOGOS_GENERATED = Gauge('bot_logos_generated', 'Total logos generated')
+ACTIVE_USERS = Gauge('bot_active_users_today', 'Active users today')
+STARS_PURCHASED = Gauge('bot_stars_purchased', 'Total stars purchased')
+PREMIUM_PURCHASED = Gauge('bot_premium_purchased', 'Total premium subscriptions purchased')
+
+# Глобальные структуры данных
+users_db = {}
+referral_codes = {}
+promo_codes = {}
+bot_stats = {
+    "total_users": 0,
+    "active_today": 0,
+    "images_generated": 0,
+    "texts_generated": 0,
+    "avatars_generated": 0,
+    "logos_generated": 0,
+    "stars_purchased": 0,
+    "premium_purchased": 0,
+    "last_update": datetime.datetime.now().isoformat()
+}
+admin_broadcast_data = {}
+db_lock = asyncio.Lock()
+BOT_USERNAME = ""
+
 class UserState:
     MAIN_MENU = "main_menu"
     GENERATE_MENU = "generate_menu"
@@ -210,25 +240,6 @@ TEXT_MODELS = {
         True
     )
 }
-
-# Глобальные структуры данных
-users_db = {}
-referral_codes = {}
-promo_codes = {}
-bot_stats = {
-    "total_users": 0,
-    "active_today": 0,
-    "images_generated": 0,
-    "texts_generated": 0,
-    "avatars_generated": 0,
-    "logos_generated": 0,
-    "stars_purchased": 0,
-    "premium_purchased": 0,
-    "last_update": datetime.datetime.now().isoformat()
-}
-admin_broadcast_data = {}
-db_lock = asyncio.Lock()
-BOT_USERNAME = ""
 
 class User:
     def __init__(self, user_id: int):
@@ -474,7 +485,6 @@ async def load_db():
 async def save_db():
     try:
         async with db_lock:
-            # Сохраняем пользователей
             data = {
                 'users': {k: v.to_dict() for k, v in users_db.items()},
                 'referral_codes': referral_codes
@@ -2504,7 +2514,7 @@ async def generate_text(user: User, text: str, message: Message):
             await animate_error(message, "❌ Эта модель доступна только для премиум пользователей")
             return
             
-        if len(text) > MAX_PROMPT_LENGTH:
+        if len(text) > MAX_PROMPt_LENGTH:
             await animate_error(message, f"⚠️ Превышен лимит {MAX_PROMPT_LENGTH} символов")
             return
             
@@ -2862,29 +2872,42 @@ async def auto_save_db():
         await save_db()
         logger.info("Database auto-saved")
 
+async def self_pinger():
+    """Регулярные ping-запросы для предотвращения сна сервиса"""
+    RENDER_APP_URL = "https://aibot-plcn.onrender.com"
+    while True:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(RENDER_APP_URL, timeout=10) as response:
+                    logger.info(f"Self-ping status: {response.status}")
+        except Exception as e:
+            logger.error(f"Self-ping failed: {str(e)}")
+        await asyncio.sleep(600)  # 10 минут
+
 # ===================== LIFESPAN HANDLER =====================
 from contextlib import asynccontextmanager
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Управление жизненным циклом приложения"""
-    # Запуск при старте
+    # Загрузка данных при старте
     await load_db()
+    
+    # Инициализация бота
+    bot_info = await bot.get_me()
+    global BOT_USERNAME
+    BOT_USERNAME = bot_info.username
+    logger.info(f"Bot @{BOT_USERNAME} started")
+    
+    # Фоновые задачи
     asyncio.create_task(auto_save_db())
-    
-    # Запуск self-pinger
-    async def self_pinger():
-        RENDER_APP_URL = "https://aibot-plcn.onrender.com"
-        while True:
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(RENDER_APP_URL, timeout=10) as response:
-                        logger.info(f"Self-ping status: {response.status}")
-            except Exception as e:
-                logger.error(f"Self-ping failed: {str(e)}")
-            await asyncio.sleep(600)  # 10 минут
-    
     asyncio.create_task(self_pinger())
+    
+    # Очистка предыдущих обновлений
+    await bot.delete_webhook(drop_pending_updates=True)
+    
+    # Запуск бота в фоне
+    asyncio.create_task(dp.start_polling(bot, skip_updates=True))
     
     yield
     
@@ -2895,19 +2918,59 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 # ===================== ENDPOINT ДЛЯ ПРОВЕРКИ =====================
-@app.get("/")
-async def health_check():
-    return {
-        "status": "ok",
-        "bot": "active",
-        "users": len(users_db),
-        "render": "keep-alive"
-    }
+@app.api_route("/", methods=["GET", "HEAD", "POST"])
+async def health_check(request: Request):
+    # Для HEAD-запросов возвращаем только статус
+    if request.method == "HEAD":
+        return Response(status_code=200)
+    
+    # Для GET/POST возвращаем полную информацию
+    return JSONResponse(content={
+        "status": "active",
+        "service": "AI Content Generator Bot",
+        "version": "2.1",
+        "bot_status": "running" if bot else "disabled",
+        "bot_username": BOT_USERNAME,
+        "total_users": len(users_db),
+        "last_update": bot_stats.get("last_update", "unknown"),
+        "endpoints": {
+            "health": "/",
+            "metrics": "/metrics",
+            "webhook": "/webhook"
+        },
+        "statistics": {
+            "images_generated": bot_stats["images_generated"],
+            "texts_generated": bot_stats["texts_generated"],
+            "avatars_generated": bot_stats["avatars_generated"],
+            "logos_generated": bot_stats["logos_generated"],
+            "active_today": bot_stats["active_today"],
+            "stars_purchased": bot_stats["stars_purchased"],
+            "premium_purchased": bot_stats["premium_purchased"]
+        },
+        "render_info": "Keep-alive monitoring"
+    })
+
+@app.get("/metrics")
+async def metrics():
+    # Обновляем значения метрик
+    USERS_TOTAL.set(len(users_db))
+    IMAGES_GENERATED.set(bot_stats["images_generated"])
+    TEXTS_GENERATED.set(bot_stats["texts_generated"])
+    AVATARS_GENERATED.set(bot_stats["avatars_generated"])
+    LOGOS_GENERATED.set(bot_stats["logos_generated"])
+    ACTIVE_USERS.set(bot_stats["active_today"])
+    STARS_PURCHASED.set(bot_stats["stars_purchased"])
+    PREMIUM_PURCHASED.set(bot_stats["premium_purchased"])
+    
+    return Response(
+        content=generate_latest(),
+        media_type=CONTENT_TYPE_LATEST
+    )
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(
-        app,  # Используем созданное приложение
+        app,
         host="0.0.0.0",
         port=port,
         workers=1,
