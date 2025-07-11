@@ -2514,7 +2514,7 @@ async def generate_text(user: User, text: str, message: Message):
             await animate_error(message, "❌ Эта модель доступна только для премиум пользователей")
             return
             
-        if len(text) > MAX_PROMPt_LENGTH:
+        if len(text) > MAX_PROMPT_LENGTH:
             await animate_error(message, f"⚠️ Превышен лимит {MAX_PROMPT_LENGTH} символов")
             return
             
@@ -2957,7 +2957,7 @@ async def metrics():
     IMAGES_GENERATED.set(bot_stats["images_generated"])
     TEXTS_GENERATED.set(bot_stats["texts_generated"])
     AVATARS_GENERATED.set(bot_stats["avatars_generated"])
-    LOGOS_GENERATED.set(bot_stats["logos_generated"])
+    LOGOS_GENERATED.set(bot_stats[""])
     ACTIVE_USERS.set(bot_stats["active_today"])
     STARS_PURCHASED.set(bot_stats["stars_purchased"])
     PREMIUM_PURCHASED.set(bot_stats["premium_purchased"])
