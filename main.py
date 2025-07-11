@@ -60,7 +60,7 @@ MAX_RETRIES = 5
 RETRY_DELAY = 1.5
 MAX_PROMPT_LENGTH = 2000
 MAX_MESSAGE_LENGTH = 4000
-SESSION_TIMEOUT = 300
+SESSION_TIMEOUT = 2592000  # 30 дней
 DAILY_BONUS = 3
 SYSTEM_PROMPT = "Ты — полезный ИИ-ассистент. Отвечай точно и информативно."
 ADMIN_PASSWORD = "admin123"  # Пароль для доступа к админ-панели
@@ -109,7 +109,7 @@ class UserState:
     CHECK_SUBSCRIPTION = "check_subscription"
     DAILY_BONUS = "daily_bonus"
     CLEAR_CONTEXT = "clear_context"
-    ADMIN_PANEL = "admin_panel"  # Добавлено отсутствующее состояние
+    ADMIN_PANEL = "admin_panel"
     ADMIN_CREATE_PROMO = "admin_create_promo"
     ADMIN_STATS = "admin_stats"
     ADMIN_BROADCAST = "admin_broadcast"
@@ -210,6 +210,7 @@ TEXT_MODELS = {
         True
     )
 }
+
 # Глобальные структуры данных
 users_db = {}
 referral_codes = {}
@@ -451,7 +452,7 @@ async def load_db():
             admin_user = User(ADMIN_ID)
             admin_user.is_premium = True
             admin_user.premium_expiry = None
-            admin_user.stars = 1
+            admin_user.stars = 1000
             admin_user.has_subscribed = True
             users_db[ADMIN_ID] = admin_user
             admin_user.mark_modified()
@@ -473,6 +474,7 @@ async def load_db():
 async def save_db():
     try:
         async with db_lock:
+            # Сохраняем пользователей
             data = {
                 'users': {k: v.to_dict() for k, v in users_db.items()},
                 'referral_codes': referral_codes
@@ -795,7 +797,6 @@ def model_select_keyboard() -> InlineKeyboardMarkup:
 def image_models_keyboard(user: User) -> InlineKeyboardMarkup:
     buttons = []
     for key, model in IMAGE_MODELS.items():
-        # Для выбранной модели используем другой эмодзи
         if user.image_model == key:
             buttons.append([(f"✅ {model.name}", f"image_model_{key}")])
         else:
@@ -808,7 +809,6 @@ def text_models_keyboard(user: User) -> InlineKeyboardMarkup:
     buttons = []
     for key, model in TEXT_MODELS.items():
         if model.premium_only and not user.is_premium:
-            # Показываем премиум модели, но с иконкой замка
             buttons.append([(f"🔒 {model.name} (премиум)", "premium_required")])
         else:
             if user.text_model == key:
@@ -2859,64 +2859,8 @@ async def auto_save_db():
     """Автоматическое сохранение базы данных каждые 5 минут"""
     while True:
         await asyncio.sleep(300)
-        if any(user._modified for user in users_db.values()):
-            await save_db()
-            logger.info("Database auto-saved")
-
-async def clean_inactive_sessions():
-    """Очистка неактивных сессий"""
-    while True:
-        await asyncio.sleep(3600)  # Каждый час
-        current_time = time.time()
-        inactive_users = []
-        
-        for user_id, user in users_db.items():
-            if current_time - user.last_interaction > SESSION_TIMEOUT:
-                inactive_users.append(user_id)
-        
-        for user_id in inactive_users:
-            if user_id != ADMIN_ID:  # Не удаляем админа
-                del users_db[user_id]
-                logger.info(f"Cleaned inactive session: {user_id}")
-        
         await save_db()
-
-async def self_pinger():
-    """Регулярные ping-запросы для предотвращения сна сервиса"""
-    RENDER_APP_URL = "https://aibot-plcn.onrender.com"
-    while True:
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(RENDER_APP_URL, timeout=10) as response:
-                    logger.info(f"Self-ping status: {response.status}")
-        except Exception as e:
-            logger.error(f"Self-ping failed: {str(e)}")
-        await asyncio.sleep(600)  # 10 минут
-
-# ===================== ОПРЕДЕЛЕНИЕ RUN_BOT =====================
-async def run_bot():
-    """Основная функция запуска бота"""
-    try:
-        # Инициализация
-        await load_db()
-        
-        bot_info = await bot.get_me()
-        logger.info(f"Bot @{bot_info.username} started")
-        
-        # Фоновые задачи
-        asyncio.create_task(auto_save_db())
-        asyncio.create_task(clean_inactive_sessions())
-        
-        # Очистка предыдущих обновлений
-        await bot.delete_webhook(drop_pending_updates=True)
-        
-        # Запуск бота
-        await dp.start_polling(bot, skip_updates=True)
-    except Exception as e:
-        logger.error(f"Bot crashed: {e}")
-        # Перезапуск через 30 секунд при ошибке
-        await asyncio.sleep(30)
-        asyncio.create_task(run_bot())
+        logger.info("Database auto-saved")
 
 # ===================== LIFESPAN HANDLER =====================
 from contextlib import asynccontextmanager
@@ -2925,11 +2869,27 @@ from contextlib import asynccontextmanager
 async def lifespan(app: FastAPI):
     """Управление жизненным циклом приложения"""
     # Запуск при старте
-    asyncio.create_task(run_bot())
+    await load_db()
+    asyncio.create_task(auto_save_db())
+    
+    # Запуск self-pinger
+    async def self_pinger():
+        RENDER_APP_URL = "https://aibot-plcn.onrender.com"
+        while True:
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(RENDER_APP_URL, timeout=10) as response:
+                        logger.info(f"Self-ping status: {response.status}")
+            except Exception as e:
+                logger.error(f"Self-ping failed: {str(e)}")
+            await asyncio.sleep(600)  # 10 минут
+    
     asyncio.create_task(self_pinger())
+    
     yield
+    
     # Остановка при завершении
-    # Закрываем сессию бота
+    await save_db()
     await bot.session.close()
 
 app = FastAPI(lifespan=lifespan)
@@ -2940,6 +2900,7 @@ async def health_check():
     return {
         "status": "ok",
         "bot": "active",
+        "users": len(users_db),
         "render": "keep-alive"
     }
 
