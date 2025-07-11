@@ -41,6 +41,7 @@ TEXT_URL = "https://text.pollinations.ai/prompt/"
 PAYMENT_ADMIN = "@telichko_a"
 DB_FILE = "users_db.json"
 LOG_FILE = "bot_errors.log"
+PROMO_FILE = "promo_codes.json"
 
 # Константы
 IMAGE_COST = 5
@@ -61,6 +62,7 @@ MAX_MESSAGE_LENGTH = 4000
 SESSION_TIMEOUT = 300
 DAILY_BONUS = 3
 SYSTEM_PROMPT = "Ты — полезный ИИ-ассистент. Отвечай точно и информативно."
+ADMIN_PASSWORD = "admin123"  # Пароль для доступа к админ-панели
 
 # ===================== ИНИЦИАЛИЗАЦИЯ =====================
 logging.basicConfig(
@@ -106,6 +108,10 @@ class UserState:
     CHECK_SUBSCRIPTION = "check_subscription"
     DAILY_BONUS = "daily_bonus"
     CLEAR_CONTEXT = "clear_context"
+    ADMIN_PANEL = "admin_panel"
+    ADMIN_CREATE_PROMO = "admin_create_promo"
+    ADMIN_BROADCAST = "admin_broadcast"
+    ADMIN_STATS = "admin_stats"
 
 class GenerationModel:
     def __init__(self, key: str, name: str, description: str, cost_multiplier: float, 
@@ -206,6 +212,8 @@ TEXT_MODELS = {
 # Глобальные структуры данных
 users_db = {}
 referral_codes = {}
+promo_codes = {}
+admin_broadcast_data = {}
 db_lock = asyncio.Lock()
 BOT_USERNAME = ""
 
@@ -238,6 +246,7 @@ class User:
         self.last_daily_bonus = None
         self.pending_referral = None
         self.referral_used = False
+        self.join_date = datetime.datetime.now().isoformat()
         
     def mark_modified(self):
         self._modified = True
@@ -269,7 +278,8 @@ class User:
             "has_subscribed": self.has_subscribed,
             "last_daily_bonus": self.last_daily_bonus,
             "pending_referral": self.pending_referral,
-            "referral_used": self.referral_used
+            "referral_used": self.referral_used,
+            "join_date": self.join_date
         }
     
     @classmethod
@@ -300,6 +310,7 @@ class User:
         user.last_daily_bonus = data.get("last_daily_bonus", None)
         user.pending_referral = data.get("pending_referral", None)
         user.referral_used = data.get("referral_used", False)
+        user.join_date = data.get("join_date", datetime.datetime.now().isoformat())
         user._modified = False
         return user
         
@@ -380,10 +391,11 @@ class User:
 
 # ===================== УТИЛИТЫ =====================
 async def load_db():
-    global users_db, referral_codes
+    global users_db, referral_codes, promo_codes
     try:
         users_db = {}
         referral_codes = {}
+        promo_codes = {}
         
         if os.path.exists(DB_FILE):
             async with db_lock:
@@ -397,6 +409,12 @@ async def load_db():
                             referral_codes[user.referral_code] = user_id
                     
                     logger.info("Database loaded successfully")
+        
+        # Загрузка промокодов
+        if os.path.exists(PROMO_FILE):
+            with open(PROMO_FILE, 'r', encoding='utf-8') as f:
+                promo_codes = json.load(f)
+                logger.info(f"Loaded {len(promo_codes)} promo codes")
                     
         # Создаем пользователя для админа если его нет
         if ADMIN_ID not in users_db:
@@ -420,6 +438,7 @@ async def load_db():
         logger.error(f"Error loading database: {e}")
         users_db = {}
         referral_codes = {}
+        promo_codes = {}
 
 async def save_db():
     try:
@@ -431,6 +450,10 @@ async def save_db():
             
             with open(DB_FILE, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
+            
+            # Сохраняем промокоды
+            with open(PROMO_FILE, 'w', encoding='utf-8') as f:
+                json.dump(promo_codes, f, ensure_ascii=False, indent=2)
             
             for user in users_db.values():
                 user._modified = False
@@ -761,6 +784,20 @@ def text_models_keyboard(user: User) -> InlineKeyboardMarkup:
     buttons.append([("🔙 Назад", "model_select")])
     return create_keyboard(buttons)
 
+def admin_keyboard() -> InlineKeyboardMarkup:
+    buttons = [
+        [("🎫 Создать промокод", "admin_create_promo")],
+        [("📊 Статистика", "admin_stats")],
+        [("📣 Рассылка", "admin_broadcast")],
+        [("🏠 Главное", "home")]
+    ]
+    return create_keyboard(buttons)
+
+def admin_cancel_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="❌ Отмена", callback_data="admin_cancel")]]
+    )
+
 # ===================== АНИМАЦИИ И УВЕДОМЛЕНИЯ =====================
 async def animate_loading(message: Message, text: str, duration: float = 1.5) -> Message:
     msg = await message.answer(f"⏳ {text}")
@@ -881,6 +918,189 @@ def format_generation_cost(model: GenerationModel, base_cost: int, is_premium: b
 def format_model_info(model: GenerationModel) -> str:
     return f"{model.name}\n{model.description}\n💰 Множитель стоимости: {model.cost_multiplier}x"
 
+def format_admin_stats() -> str:
+    total_users = len(users_db)
+    active_users = sum(1 for u in users_db.values() if time.time() - u.last_interaction < 86400)
+    premium_users = sum(1 for u in users_db.values() if u.is_premium)
+    total_stars = sum(u.stars for u in users_db.values())
+    new_users_today = sum(1 for u in users_db.values() 
+                          if datetime.datetime.fromisoformat(u.join_date).date() == datetime.datetime.now().date())
+    
+    return (
+        f"📊 <b>СТАТИСТИКА БОТА</b>\n"
+        f"══════════════════\n"
+        f"👥 Всего пользователей: {total_users}\n"
+        f"👤 Активных за сутки: {active_users}\n"
+        f"💎 Премиум пользователей: {premium_users}\n"
+        f"⭐ Звёзд в системе: {total_stars}\n"
+        f"🆕 Новых сегодня: {new_users_today}\n"
+        f"══════════════════"
+    )
+
+# ===================== АДМИН-ПАНЕЛЬ =====================
+async def handle_admin_panel(callback: CallbackQuery, user: User):
+    await safe_edit_message(
+        callback,
+        "👑 <b>АДМИН-ПАНЕЛЬ</b>\n"
+        "══════════════════\n"
+        "Выберите действие:",
+        reply_markup=admin_keyboard()
+    )
+
+async def handle_admin_create_promo(callback: CallbackQuery, user: User):
+    await safe_edit_message(
+        callback,
+        "🎫 <b>СОЗДАНИЕ ПРОМОКОДА</b>\n"
+        "══════════════════\n"
+        "Введите тип промокода и значение в формате:\n"
+        "<code>тип:значение</code>\n\n"
+        "Доступные типы:\n"
+        "• <code>stars</code> - звёзды (например: stars:100)\n"
+        "• <code>premium</code> - премиум (например: premium:30 для 30 дней)\n\n"
+        "Для вечного премиума: <code>premium:forever</code>",
+        reply_markup=admin_cancel_keyboard()
+    )
+
+async def handle_admin_stats(callback: CallbackQuery, user: User):
+    stats = format_admin_stats()
+    await safe_edit_message(callback, stats, reply_markup=admin_keyboard())
+
+async def handle_admin_broadcast(callback: CallbackQuery, user: User):
+    await safe_edit_message(
+        callback,
+        "📣 <b>РАССЫЛКА СООБЩЕНИЙ</b>\n"
+        "══════════════════\n"
+        "Введите сообщение для рассылки:",
+        reply_markup=admin_cancel_keyboard()
+    )
+
+async def process_admin_command(message: Message):
+    user = await get_user(message.from_user.id)
+    
+    if user.user_id != ADMIN_ID:
+        await message.answer("⛔ У вас нет прав доступа!")
+        return
+    
+    args = message.text.split()
+    if len(args) < 2:
+        await message.answer("Использование: /admin <пароль>")
+        return
+    
+    if args[1] != ADMIN_PASSWORD:
+        await message.answer("❌ Неверный пароль!")
+        return
+    
+    user.state = UserState.ADMIN_PANEL
+    await message.answer(
+        "👑 <b>АДМИН-ПАНЕЛЬ</b>\n"
+        "══════════════════\n"
+        "Выберите действие:",
+        reply_markup=admin_keyboard()
+    )
+
+async def process_promo_creation(message: Message):
+    user = await get_user(message.from_user.id)
+    if user.user_id != ADMIN_ID:
+        return
+    
+    parts = message.text.split(":")
+    if len(parts) != 2:
+        await message.answer("❌ Неверный формат! Используйте: <тип>:<значение>")
+        return
+    
+    promo_type = parts[0].strip().lower()
+    value = parts[1].strip()
+    
+    if promo_type not in ["stars", "premium"]:
+        await message.answer("❌ Неверный тип промокода! Доступно: stars, premium")
+        return
+    
+    # Генерация уникального промокода
+    promo_code = f"ADMIN{int(time.time()) % 10000}"
+    
+    # Сохранение промокода
+    promo_data = {
+        "type": promo_type,
+        "value": value,
+        "created_by": user.user_id,
+        "created_at": datetime.datetime.now().isoformat(),
+        "used_by": [],
+        "active": True
+    }
+    
+    promo_codes[promo_code] = promo_data
+    
+    # Сохранение в файл
+    with open(PROMO_FILE, 'w', encoding='utf-8') as f:
+        json.dump(promo_codes, f, ensure_ascii=False, indent=2)
+    
+    # Отправка результата
+    await message.answer(
+        f"✅ Промокод создан!\n"
+        f"Код: <code>{promo_code}</code>\n"
+        f"Тип: {promo_type}\n"
+        f"Значение: {value}\n\n"
+        f"Сообщите этот код пользователям.",
+        reply_markup=admin_keyboard()
+    )
+    user.state = UserState.ADMIN_PANEL
+
+async def process_broadcast_message(message: Message):
+    user = await get_user(message.from_user.id)
+    if user.user_id != ADMIN_ID:
+        return
+    
+    # Сохраняем сообщение для рассылки
+    admin_broadcast_data[user.user_id] = message.text
+    
+    # Запрос подтверждения
+    await message.answer(
+        f"📣 <b>ПОДТВЕРЖДЕНИЕ РАССЫЛКИ</b>\n"
+        f"══════════════════\n"
+        f"Сообщение:\n"
+        f"{message.text}\n\n"
+        f"Получателей: {len(users_db)}\n\n"
+        f"Отправить?",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Да", callback_data="broadcast_confirm")],
+            [InlineKeyboardButton(text="❌ Нет", callback_data="admin_cancel")]
+        )
+    )
+
+async def execute_broadcast(user_id: int):
+    message_text = admin_broadcast_data.get(user_id)
+    if not message_text:
+        return
+    
+    total = len(users_db)
+    success = 0
+    failed = 0
+    
+    admin_user = await get_user(user_id)
+    await admin_user.message.answer(f"⏳ Начата рассылка для {total} пользователей...")
+    
+    for uid, user in list(users_db.items()):
+        try:
+            await bot.send_message(uid, message_text)
+            success += 1
+        except Exception as e:
+            logger.error(f"Broadcast failed for {uid}: {e}")
+            failed += 1
+        await asyncio.sleep(0.1)  # Чтобы не превысить лимиты Telegram
+    
+    # Отчет
+    report = (
+        f"📣 <b>РАССЫЛКА ЗАВЕРШЕНА</b>\n"
+        f"══════════════════\n"
+        f"• Всего получателей: {total}\n"
+        f"• Успешно: {success}\n"
+        f"• Не удалось: {failed}\n"
+        f"══════════════════"
+    )
+    
+    await bot.send_message(user_id, report, reply_markup=admin_keyboard())
+    del admin_broadcast_data[user_id]
+
 # ===================== ОБРАБОТКА МЕНЮ =====================
 async def handle_text_gen(callback: CallbackQuery, user: User):
     model = TEXT_MODELS[user.text_model]
@@ -908,7 +1128,7 @@ async def show_menu(callback: CallbackQuery, user: User):
         UserState.GENERATE_MENU: handle_generate_menu,
         UserState.PROFILE_MENU: handle_profile_menu,
         UserState.IMAGE_GEN: handle_image_gen,
-        UserState.TEXT_GEN: handle_text_gen,  # ДОБАВЛЕНО
+        UserState.TEXT_GEN: handle_text_gen,
         UserState.AVATAR_GEN: handle_avatar_gen,
         UserState.LOGO_GEN: handle_logo_gen,
         UserState.PREMIUM_INFO: handle_premium_info,
@@ -920,7 +1140,11 @@ async def show_menu(callback: CallbackQuery, user: User):
         UserState.IMAGE_COUNT_SELECT: handle_image_count_select,
         UserState.IMAGE_MODEL_SELECT: handle_image_model_select,
         UserState.MODEL_SELECT: handle_model_select,
-        UserState.TEXT_MODEL_SELECT: handle_text_model_select
+        UserState.TEXT_MODEL_SELECT: handle_text_model_select,
+        UserState.ADMIN_PANEL: handle_admin_panel,
+        UserState.ADMIN_CREATE_PROMO: handle_admin_create_promo,
+        UserState.ADMIN_STATS: handle_admin_stats,
+        UserState.ADMIN_BROADCAST: handle_admin_broadcast
     }
     
     handler = menu_handlers.get(user.state)
@@ -1160,6 +1384,16 @@ async def cancel_handler(callback: CallbackQuery):
     user.state = UserState.MAIN_MENU
     user.menu_stack = []
     await callback.message.answer("❌ Действие отменено", reply_markup=main_keyboard(user))
+    await callback.answer()
+
+@dp.callback_query(F.data == "admin_cancel")
+async def admin_cancel_handler(callback: CallbackQuery):
+    user = await get_user(callback.from_user.id)
+    if not await ensure_subscription(callback, user):
+        return
+    
+    user.state = UserState.ADMIN_PANEL
+    await show_menu(callback, user)
     await callback.answer()
 
 @dp.callback_query(F.data == "check_subscription")
@@ -1757,6 +1991,51 @@ async def clear_context(callback: CallbackQuery):
     )
     await safe_edit_message(callback, text, reply_markup=text_options_keyboard(user))
 
+@dp.callback_query(F.data == "admin_create_promo")
+async def admin_create_promo(callback: CallbackQuery):
+    user = await get_user(callback.from_user.id)
+    if user.user_id != ADMIN_ID:
+        return
+    
+    user.push_menu(user.state, {})
+    user.state = UserState.ADMIN_CREATE_PROMO
+    user.mark_modified()
+    await show_menu(callback, user)
+    await callback.answer()
+
+@dp.callback_query(F.data == "admin_stats")
+async def admin_stats(callback: CallbackQuery):
+    user = await get_user(callback.from_user.id)
+    if user.user_id != ADMIN_ID:
+        return
+    
+    user.push_menu(user.state, {})
+    user.state = UserState.ADMIN_STATS
+    user.mark_modified()
+    await show_menu(callback, user)
+    await callback.answer()
+
+@dp.callback_query(F.data == "admin_broadcast")
+async def admin_broadcast(callback: CallbackQuery):
+    user = await get_user(callback.from_user.id)
+    if user.user_id != ADMIN_ID:
+        return
+    
+    user.push_menu(user.state, {})
+    user.state = UserState.ADMIN_BROADCAST
+    user.mark_modified()
+    await show_menu(callback, user)
+    await callback.answer()
+
+@dp.callback_query(F.data == "broadcast_confirm")
+async def broadcast_confirm(callback: CallbackQuery):
+    user = await get_user(callback.from_user.id)
+    if user.user_id != ADMIN_ID:
+        return
+    
+    await callback.message.delete()
+    await execute_broadcast(user.user_id)
+
 # ===================== ПРОВЕРКА ПОДПИСКИ =====================
 async def check_subscription(user_id: int) -> bool:
     if user_id == ADMIN_ID:
@@ -2089,6 +2368,7 @@ async def generate_text(user: User, text: str, message: Message):
 async def process_promo_code(user: User, promo_code: str, message: Message):
     promo_code = promo_code.strip().upper()
     
+    # Проверяем системные промокоды
     if promo_code == "FREESTARS":
         user.stars += 100
         text = "🎁 Активирован промокод! +100 ⭐"
@@ -2098,7 +2378,45 @@ async def process_promo_code(user: User, promo_code: str, message: Message):
         user.stars += 1000
         text = "💎 Активирован VIP промокод!"
     else:
-        text = "❌ Неверный промокод"
+        # Проверяем админские промокоды
+        promo = promo_codes.get(promo_code)
+        if not promo or not promo.get("active", True):
+            text = "❌ Неверный промокод"
+        else:
+            if promo["type"] == "stars":
+                try:
+                    stars = int(promo["value"])
+                    user.stars += stars
+                    text = f"🎁 Активирован промокод! +{stars} ⭐"
+                except:
+                    text = "❌ Ошибка в значении промокода"
+            elif promo["type"] == "premium":
+                if promo["value"] == "forever":
+                    user.is_premium = True
+                    user.premium_expiry = None
+                    text = "💎 Активирован вечный премиум!"
+                else:
+                    try:
+                        days = int(promo["value"])
+                        expiry = time.time() + days * 24 * 3600
+                        user.is_premium = True
+                        user.premium_expiry = expiry
+                        text = f"💎 Активирован премиум на {days} дней!"
+                    except:
+                        text = "❌ Ошибка в значении промокода"
+            
+            # Добавляем пользователя в список использовавших
+            if "used_by" not in promo:
+                promo["used_by"] = []
+            promo["used_by"].append({
+                "user_id": user.user_id,
+                "date": datetime.datetime.now().isoformat()
+            })
+            promo_codes[promo_code] = promo
+            
+            # Сохраняем промокоды
+            with open(PROMO_FILE, 'w', encoding='utf-8') as f:
+                json.dump(promo_codes, f, ensure_ascii=False, indent=2)
     
     user.state = UserState.MAIN_MENU
     await message.answer(text, reply_markup=main_keyboard(user))
@@ -2158,6 +2476,10 @@ async def send_welcome(message: Message):
     await message.answer(welcome_text, reply_markup=main_keyboard(user))
     await save_db()
 
+@dp.message(Command("admin"))
+async def admin_command(message: Message):
+    await process_admin_command(message)
+
 @dp.message(Command("balance"))
 async def balance_command(message: Message):
     user = await get_user(message.from_user.id)
@@ -2210,6 +2532,12 @@ async def handle_message(message: Message):
             
         elif user.state == UserState.ACTIVATE_PROMO:
             await process_promo_code(user, text, message)
+            
+        elif user.state == UserState.ADMIN_CREATE_PROMO:
+            await process_promo_creation(message)
+            
+        elif user.state == UserState.ADMIN_BROADCAST:
+            await process_broadcast_message(message)
             
     except Exception as e:
         logger.error(f"Error in handle_message: {e}")
@@ -2267,7 +2595,6 @@ async def pay_support_handler(message: Message):
         "Поддержка по платежам: @payment_admin\n\n"
         "Возврат средств возможен в течение 14 дней"
     )
-# ... (предыдущий код без изменений до создания app) ...
 
 # ===================== ФОНОВЫЕ ЗАДАЧИ =====================
 async def auto_save_db():
@@ -2357,12 +2684,6 @@ async def health_check():
         "bot": "active",
         "render": "keep-alive"
     }
-
-# ... (остальной код без изменений) ...
-
-# Удаляем дублирующиеся определения run_bot и self_pinger
-
-# Удаляем блок с @app.on_event("startup"), потому что мы используем lifespan
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
