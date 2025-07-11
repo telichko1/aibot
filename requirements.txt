@@ -8,3 +8,4 @@ Flask
 gevent>=1.4
 fastapi
 filelock>=3.0.0
+prometheus_client
