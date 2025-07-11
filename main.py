@@ -82,6 +82,129 @@ bot = Bot(
     default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
+# ===================== МОДЕЛИ ДАННЫХ =====================
+class UserState:
+    MAIN_MENU = "main_menu"
+    GENERATE_MENU = "generate_menu"
+    PROFILE_MENU = "profile_menu"
+    IMAGE_GEN = "image_gen"
+    TEXT_GEN = "text_gen"
+    AVATAR_GEN = "avatar_gen"
+    LOGO_GEN = "logo_gen"
+    PREMIUM_INFO = "premium_info"
+    SHOP = "shop"
+    REFERRAL = "referral"
+    BALANCE = "balance"
+    IMAGE_OPTIONS = "image_options"
+    AVATAR_OPTIONS = "avatar_options"
+    LOGO_OPTIONS = "logo_options"
+    IMAGE_IMPROVE = "image_improve"
+    PAYMENT_PROCESSING = "payment_processing"
+    ACTIVATE_PROMO = "activate_promo"
+    SUPPORT = "support"
+    IMAGE_COUNT_SELECT = "image_count_select"
+    IMAGE_MODEL_SELECT = "image_model_select"
+    TEXT_MODEL_SELECT = "text_model_select"
+    MODEL_SELECT = "model_select"
+    CHECK_SUBSCRIPTION = "check_subscription"
+    DAILY_BONUS = "daily_bonus"
+    CLEAR_CONTEXT = "clear_context"
+
+class GenerationModel:
+    def __init__(self, key: str, name: str, description: str, cost_multiplier: float, 
+                 prompt: str = "", premium_only: bool = False):
+        self.key = key
+        self.name = name
+        self.description = description
+        self.cost_multiplier = cost_multiplier
+        self.prompt = prompt
+        self.premium_only = premium_only
+
+# Модели ИИ
+IMAGE_MODELS = {
+    "dalle3": GenerationModel(
+        "dalle3", "🖼️ DALL·E 3", 
+        "Новейшая модель от OpenAI с фотографическим качеством", 1.0,
+        "masterpiece, best quality, 8K resolution, cinematic lighting, ultra-detailed, sharp focus"
+    ),
+    "midjourney": GenerationModel(
+        "midjourney", "🎨 Midjourney V6", 
+        "Лидер в художественной генерации с уникальным стилем", 1.2,
+        "masterpiece, intricate details, artistic composition, vibrant colors, atmospheric perspective, trending on artstation"
+    ),
+    "stablediff": GenerationModel(
+        "stablediff", "⚡ Stable Diffusion XL", 
+        "Открытая модель с быстрой генерацией и высокой кастомизацией", 0.8,
+        "photorealistic, ultra HD, 32k, detailed texture, realistic lighting, DSLR quality"
+    ),
+    "firefly": GenerationModel(
+        "firefly", "🔥 Adobe Firefly", 
+        "Оптимизирована для профессионального дизайна и коммерческого использования", 1.1,
+        "commercial quality, professional design, clean composition, vector art, modern aesthetics, brand identity"
+    ),
+    "deepseek": GenerationModel(
+        "deepseek", "🤖 DeepSeek Vision", 
+        "Экспериментальная модель с акцентом на технологичные образы", 0.9,
+        "futuristic, cyberpunk, neon glow, holographic elements, sci-fi aesthetics, digital art"
+    ),
+    "playground": GenerationModel(
+        "playground", "🎮 Playground v2.5", 
+        "Художественная модель с уникальным стилем", 1.0,
+        "dynamic composition, vibrant palette, artistic brushwork, impressionist style, emotional impact"
+    )
+}
+
+TEXT_MODELS = {
+    "gpt4": GenerationModel(
+        "gpt4", "🧠 GPT-4 Turbo", 
+        "Самый мощный текстовый ИИ от OpenAI", 1.0,
+        "Ты - продвинутый ИИ-ассистент. Отвечай точно, информативно и креативно."
+    ),
+    "claude": GenerationModel(
+        "claude", "🤖 Claude 3 Opus", 
+        "Модель с самым большим контекстом и аналитическими способностями", 1.3,
+        "Ты - полезный, честный и безвредный ассистент. Отвечай подробно и обстоятельно."
+    ),
+    "gemini": GenerationModel(
+        "gemini", "💎 Gemini Pro", 
+        "Мультимодальная модель от Google с интеграцией сервисов", 0.9,
+        "Ты - многофункциональный ассистент Google. Отвечай кратко и по существу."
+    ),
+    "mixtral": GenerationModel(
+        "mixtral", "🌀 Mixtral 8x7B", 
+        "Открытая модель с лучшим соотношением скорости и качества", 0.7,
+        "Ты - эксперт в различных областях знаний. Отвечай профессионально и точно."
+    ),
+    "llama3": GenerationModel(
+        "llama3", "🦙 Llama 3 70B", 
+        "Новейшая открытая модель от Meta с улучшенными возможностями", 0.8,
+        "Ты - дружелюбный и креативный ассистент. Отвечай с юмором и творческим подходом."
+    ),
+    "claude_sonnet_4": GenerationModel(
+        "claude_sonnet_4", "🧠 Claude Sonnet 4", 
+        "Экспертный уровень аналитики", 1.5,
+        "Ты - продвинутый ИИ Claude 4. Отвечай как профессиональный консультант: анализируй проблему, предлагай решения, предупреждай о рисках. Будь максимально полезным.",
+        True
+    ),
+    "gemini_2_5": GenerationModel(
+        "gemini_2_5", "💎 Google Gemini 2.5", 
+        "Максимально практичные ответы", 1.4,
+        "Ты - Gemini, ИИ нового поколения. Отвечай кратко, но содержательно. Используй маркированные списки для структуры. Всегда предлагай практические шаги.",
+        True
+    ),
+    "grok_3": GenerationModel(
+        "grok_3", "🚀 xAI Grok 3", 
+        "Технически точно с юмором", 1.2,
+        "Ты - Grok, ИИ с чувством юмора. Отвечай информативно, но с долей иронии. Используй современные аналогии. Не будь занудой.",
+        True
+    ),
+    "o3_mini": GenerationModel(
+        "o3_mini", "⚡ OpenAI o3-mini", 
+        "Сверхбыстрые и точные ответы", 0.9,
+        "Ты - o3-mini, эксперт по эффективности. Отвечай максимально кратко, но содержательно. Используй тезисы. Избегай 'воды'.",
+        True
+    )
+}
 # Глобальные структуры данных
 users_db = {}
 referral_codes = {}
