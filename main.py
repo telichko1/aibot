@@ -451,7 +451,7 @@ async def load_db():
             admin_user = User(ADMIN_ID)
             admin_user.is_premium = True
             admin_user.premium_expiry = None
-            admin_user.stars = 10000
+            admin_user.stars = 1
             admin_user.has_subscribed = True
             users_db[ADMIN_ID] = admin_user
             admin_user.mark_modified()
