@@ -109,6 +109,11 @@ class UserState:
     CHECK_SUBSCRIPTION = "check_subscription"
     DAILY_BONUS = "daily_bonus"
     CLEAR_CONTEXT = "clear_context"
+    ADMIN_PANEL = "admin_panel"  # Добавлено отсутствующее состояние
+    ADMIN_CREATE_PROMO = "admin_create_promo"
+    ADMIN_STATS = "admin_stats"
+    ADMIN_BROADCAST = "admin_broadcast"
+    ADMIN_PROMO_LIST = "admin_promo_list"
 
 class GenerationModel:
     def __init__(self, key: str, name: str, description: str, cost_multiplier: float, 
