@@ -1063,7 +1063,7 @@ async def process_broadcast_message(message: Message):
         f"Отправить?",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="✅ Да", callback_data="broadcast_confirm")],
-            [InlineKeyboardButton(text="❌ Нет", callback_data="admin_cancel")]
+            [InlineKeyboardButton(text="❌ Нет", callback_data="admin_cancel")]]
         )
     )
 
