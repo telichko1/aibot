@@ -24,7 +24,6 @@ from aiogram.types import (
     PreCheckoutQuery,
     InputMediaPhoto,
     Message,
-    ChatMember,
     FSInputFile
 )
 from aiogram.utils.markdown import hbold, hcode
@@ -654,38 +653,6 @@ async def load_db():
         templates = {}
         achievements = {}
 
-async def save_db():
-    try:
-        async with db_lock:
-            data = {
-                'users': {k: v.to_dict() for k, v in users_db.items()},
-                'referral_codes': referral_codes
-            }
-            
-            with open(DB_FILE, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-            
-            with open(PROMO_FILE, 'w', encoding='utf-8') as f:
-                json.dump(promo_codes, f, ensure_ascii=False, indent=2)
-                
-            templates_data = {t_id: t.dict() for t_id, t in templates.items()}
-            with open(TEMPLATES_FILE, 'w', encoding='utf-8') as f:
-                json.dump(templates_data, f, ensure_ascii=False, indent=2)
-                
-            achievements_data = {a_id: a.dict() for a_id, a in achievements.items()}
-            with open(ACHIEVEMENTS_FILE, 'w', encoding='utf-8') as f:
-                json.dump(achievements_data, f, ensure_ascii=False, indent=2)
-                
-            with open(STATS_FILE, 'w', encoding='utf-8') as f:
-                json.dump(bot_stats, f, ensure_ascii=False, indent=2)
-            
-            for user in users_db.values():
-                user._modified = False
-                
-            logger.info("Database saved")
-    except Exception as e:
-        logger.error(f"Error saving database: {e}")
-
 def create_default_achievements():
     global achievements
     achievements = {
@@ -765,6 +732,38 @@ def create_default_templates():
             created_at=datetime.datetime.now().isoformat()
         )
     }
+
+async def save_db():
+    try:
+        async with db_lock:
+            data = {
+                'users': {k: v.to_dict() for k, v in users_db.items()},
+                'referral_codes': referral_codes
+            }
+            
+            with open(DB_FILE, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            
+            with open(PROMO_FILE, 'w', encoding='utf-8') as f:
+                json.dump(promo_codes, f, ensure_ascii=False, indent=2)
+                
+            templates_data = {t_id: t.dict() for t_id, t in templates.items()}
+            with open(TEMPLATES_FILE, 'w', encoding='utf-8') as f:
+                json.dump(templates_data, f, ensure_ascii=False, indent=2)
+                
+            achievements_data = {a_id: a.dict() for a_id, a in achievements.items()}
+            with open(ACHIEVEMENTS_FILE, 'w', encoding='utf-8') as f:
+                json.dump(achievements_data, f, ensure_ascii=False, indent=2)
+                
+            with open(STATS_FILE, 'w', encoding='utf-8') as f:
+                json.dump(bot_stats, f, ensure_ascii=False, indent=2)
+            
+            for user in users_db.values():
+                user._modified = False
+                
+            logger.info("Database saved")
+    except Exception as e:
+        logger.error(f"Error saving database: {e}")
 
 async def get_user(user_id: int) -> User:
     if user_id in users_db:
