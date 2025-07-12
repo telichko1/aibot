@@ -37,7 +37,7 @@ from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, Gauge, Count
 from pydantic import BaseModel
 
 # ===================== КОНСТАНТЫ =====================
-API_TOKEN = os.getenv("BOT_TOKEN", "7783817301:AAFxS4fXUTe9Q34NrP8110yvzZeBNIMmui4")
+API_TOKEN = os.getenv("BOT_TOKEN", "7965257689:AAGEiEit2zlc0hIQC0MiYAjAgclOw8DzuO4")
 ADMIN_ID = int(os.getenv("ADMIN_ID", 750638552))
 CHANNEL_ID = int(os.getenv("CHANNEL_ID", -1002712232742))
 
