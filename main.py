@@ -913,7 +913,405 @@ def count_words(text: str) -> int:
 
 def generate_random_id(length=8):
     return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
+# ===================== ФУНКЦИИ ДЛЯ ФОНОВЫХ ЗАДАЧ =====================
+async def auto_save_db():
+    """Фоновая задача для автоматического сохранения базы данных"""
+    while True:
+        try:
+            await asyncio.sleep(300)  # Сохраняем каждые 5 минут
+            await save_db()
+            logger.info("Auto-saved database")
+        except Exception as e:
+            logger.error(f"Auto-save error: {e}")
 
+async def self_pinger():
+    """Фоновая задача для поддержания активности приложения"""
+    while True:
+        try:
+            await asyncio.sleep(60)  # Пинг каждую минуту
+            async with aiohttp.ClientSession() as session:
+                async with session.get("https://your-app-url.onrender.com/"):
+                    pass
+            logger.debug("Self-ping executed")
+        except Exception as e:
+            logger.error(f"Self-ping error: {e}")
+
+# ===================== ПРОВЕРКА ПОДПИСКИ =====================
+async def check_subscription(user_id: int) -> bool:
+    """Проверяет, подписан ли пользователь на канал"""
+    try:
+        chat_member = await bot.get_chat_member(CHANNEL_ID, user_id)
+        return chat_member.status in [
+            ChatMemberStatus.MEMBER,
+            ChatMemberStatus.ADMINISTRATOR,
+            ChatMemberStatus.CREATOR
+        ]
+    except Exception as e:
+        logger.error(f"Subscription check error: {e}")
+        return False
+
+async def ensure_subscription(update: Union[Message, CallbackQuery], user: User) -> bool:
+    """Обеспечивает, что пользователь подписан на канал"""
+    if user.has_subscribed:
+        return True
+    
+    if await check_subscription(user.user_id):
+        user.has_subscribed = True
+        user.mark_modified()
+        await save_db()
+        return True
+    
+    text = (
+        "📢 Для использования бота необходимо подписаться на наш канал!\n"
+        "👉 https://t.me/neurogptpro 👈\n\n"
+        "После подписки нажмите кнопку ниже"
+    )
+    
+    if isinstance(update, Message):
+        await update.answer(text, reply_markup=subscribe_keyboard())
+    else:
+        await update.message.answer(text, reply_markup=subscribe_keyboard())
+    
+    return False
+
+# ===================== ОБРАБОТКА ПЛАТЕЖЕЙ И ПРОМОКОДОВ =====================
+@dp.pre_checkout_query()
+async def process_pre_checkout_query(pre_checkout_query: PreCheckoutQuery):
+    user_id = pre_checkout_query.from_user.id
+    user = await get_user(user_id)
+    await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
+    logger.info(f"Pre-checkout approved for {user_id}")
+
+@dp.message(F.successful_payment)
+async def process_successful_payment(message: Message):
+    user = await get_user(message.from_user.id)
+    payment = message.successful_payment
+    item = payment.invoice_payload
+    
+    items = {
+        "stars30": {"stars": 30},
+        "stars50": {"stars": 50},
+        "stars150": {"stars": 150},
+        "stars500": {"stars": 500},
+        "premium_month": {"premium": True, "expiry": time.time() + 30 * 24 * 3600},
+        "premium_forever": {"premium": True, "expiry": None}
+    }
+    
+    if item in items:
+        product = items[item]
+        if "stars" in product:
+            user.stars += product["stars"]
+            bot_stats["stars_purchased"] += product["stars"]
+            STARS_PURCHASED.inc(product["stars"])
+            text = f"✅ Куплено {product['stars']} ⭐"
+        else:
+            user.is_premium = True
+            user.premium_expiry = product.get("expiry")
+            bot_stats["premium_purchased"] += 1
+            PREMIUM_PURCHASED.inc()
+            text = "💎 Премиум подписка активирована!"
+        
+        user.mark_modified()
+        await save_db()
+        await message.answer(text + "\n" + format_balance(user), reply_markup=main_keyboard(user))
+    else:
+        await message.answer("❌ Неизвестный товар, обратитесь в поддержку")
+
+async def process_referral(user: User, ref_code: str):
+    """Обрабатывает реферальный код"""
+    if user.referral_used:
+        return
+    
+    referrer_id = referral_codes.get(ref_code)
+    if not referrer_id or referrer_id == user.user_id:
+        return
+    
+    if referrer_id in users_db:
+        referrer = users_db[referrer_id]
+        referrer.referral_balance += REFERRAL_BONUS
+        referrer.mark_modified()
+        
+        user.stars += START_BALANCE_STARS // 2
+        user.referral_used = True
+        user.mark_modified()
+        
+        await send_notification(
+            referrer_id,
+            f"🎉 Новый реферал!\n"
+            f"Пользователь @{user.user_id} присоединился по вашей ссылке\n"
+            f"+{REFERRAL_BONUS} 💎 на реферальный баланс"
+        )
+        
+        await bot.send_message(
+            user.user_id,
+            f"🎁 Реферальный бонус!\n"
+            f"+{START_BALANCE_STARS // 2} ⭐ на ваш баланс"
+        )
+        
+        await save_db()
+
+async def process_promo_code(user: User, promo_code: str, message: Message):
+    """Активирует промокод для пользователя"""
+    promo_data = promo_codes.get(promo_code.upper())
+    
+    if not promo_data or not promo_data.get("active", True):
+        await message.answer("❌ Неверный или неактивный промокод")
+        return
+    
+    # Проверка лимита использования
+    used_count = promo_data.get("used_count", 0)
+    if "limit" in promo_data and used_count >= promo_data["limit"]:
+        await message.answer("❌ Лимит использования промокода исчерпан")
+        return
+    
+    # Проверка, не использовал ли пользователь уже этот промокод
+    if "used_by" in promo_data:
+        if any(entry["user_id"] == user.user_id for entry in promo_data["used_by"]):
+            await message.answer("ℹ️ Вы уже активировали этот промокод")
+            return
+    
+    # Активация промокода
+    promo_type = promo_data["type"]
+    value = promo_data["value"]
+    
+    if promo_type == "stars":
+        user.stars += value
+        text = f"🎁 Активировано {value} ⭐"
+    elif promo_type == "premium":
+        if value == "forever":
+            user.is_premium = True
+            user.premium_expiry = None
+            text = "💎 Активирован вечный премиум доступ!"
+        else:
+            days = int(value)
+            expiry = time.time() + days * 24 * 3600
+            user.is_premium = True
+            user.premium_expiry = expiry
+            text = f"💎 Активирован премиум доступ на {days} дней!"
+    
+    # Обновление данных промокода
+    promo_data["used_count"] = used_count + 1
+    if "used_by" not in promo_data:
+        promo_data["used_by"] = []
+    
+    promo_data["used_by"].append({
+        "user_id": user.user_id,
+        "date": datetime.datetime.now().isoformat()
+    })
+    
+    promo_codes[promo_code.upper()] = promo_data
+    user.mark_modified()
+    
+    # Сохранение и уведомление
+    await save_db()
+    await message.answer(text + "\n" + format_balance(user), reply_markup=main_keyboard(user))
+
+# ===================== АДМИН-ФУНКЦИИ =====================
+async def process_admin_command(message: Message):
+    """Обработчик команды /admin"""
+    user = await get_user(message.from_user.id)
+    if user.user_id != ADMIN_ID:
+        return
+    
+    args = message.text.split()
+    if len(args) > 1 and args[1] == ADMIN_PASSWORD:
+        user.state = UserState.ADMIN_PANEL
+        await message.answer("👑 Админ-панель", reply_markup=admin_keyboard())
+    else:
+        await message.answer("🔒 Введите пароль админа:")
+
+async def process_promo_creation(message: Message):
+    """Создание промокода по команде админа"""
+    user = await get_user(message.from_user.id)
+    if user.user_id != ADMIN_ID:
+        return
+    
+    try:
+        parts = message.text.split(":")
+        if len(parts) < 3:
+            raise ValueError("Неверный формат")
+        
+        promo_type = parts[0].strip()
+        value = parts[1].strip()
+        limit = int(parts[2].strip())
+        
+        if promo_type not in ["stars", "premium"]:
+            raise ValueError("Неверный тип промокода")
+        
+        # Генерация уникального кода
+        promo_code = "PROMO" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+        while promo_code in promo_codes:
+            promo_code = "PROMO" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+        
+        # Создание промокода
+        promo_codes[promo_code] = {
+            "type": promo_type,
+            "value": value,
+            "limit": limit if limit > 0 else 0,
+            "created_by": user.user_id,
+            "created_at": datetime.datetime.now().isoformat(),
+            "active": True,
+            "used_count": 0
+        }
+        
+        # Сохранение
+        with open(PROMO_FILE, 'w', encoding='utf-8') as f:
+            json.dump(promo_codes, f, ensure_ascii=False, indent=2)
+        
+        await message.answer(f"✅ Промокод создан: {promo_code}")
+        user.state = UserState.ADMIN_PANEL
+        await show_menu(message, user)
+    except Exception as e:
+        await message.answer(f"❌ Ошибка: {str(e)}")
+
+async def process_broadcast_message(message: Message):
+    """Обработка сообщения для рассылки"""
+    user = await get_user(message.from_user.id)
+    if user.user_id != ADMIN_ID:
+        return
+    
+    admin_broadcast_data[user.user_id] = message.text
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Подтвердить", callback_data="broadcast_confirm")],
+        [InlineKeyboardButton(text="❌ Отменить", callback_data="broadcast_cancel")]
+    ])
+    await message.answer(
+        f"📣 Подтвердите рассылку:\n{message.text[:500]}...",
+        reply_markup=keyboard
+    )
+
+async def execute_broadcast(admin_id: int):
+    """Выполняет рассылку сообщения"""
+    if admin_id not in admin_broadcast_data or admin_broadcast_data[admin_id] == "CANCEL":
+        return
+    
+    text = admin_broadcast_data[admin_id]
+    success = 0
+    errors = 0
+    
+    await bot.send_message(admin_id, "⏳ Начинаю рассылку...")
+    
+    for user_id, user in list(users_db.items()):
+        try:
+            await bot.send_message(user_id, text)
+            success += 1
+            if success % 10 == 0:
+                await asyncio.sleep(1)
+        except Exception as e:
+            errors += 1
+            logger.error(f"Broadcast to {user_id} failed: {e}")
+    
+    del admin_broadcast_data[admin_id]
+    await bot.send_message(
+        admin_id,
+        f"📣 Рассылка завершена!\n"
+        f"✅ Успешно: {success}\n"
+        f"❌ Ошибок: {errors}",
+        reply_markup=admin_keyboard()
+    )
+
+async def process_admin_search_user(message: Message, text: str):
+    """Поиск пользователя по ID"""
+    user = await get_user(message.from_user.id)
+    if user.user_id != ADMIN_ID:
+        return
+    
+    try:
+        user_id = int(text)
+        if user_id not in users_db:
+            await message.answer("❌ Пользователь не найден")
+            return
+        
+        target_user = users_db[user_id]
+        await handle_admin_view_user(message, user, user_id)
+    except ValueError:
+        await message.answer("❌ Неверный формат ID")
+
+async def process_admin_edit_user(message: Message, text: str):
+    """Редактирование данных пользователя"""
+    user = await get_user(message.from_user.id)
+    if user.user_id != ADMIN_ID:
+        return
+    
+    try:
+        parts = text.split(":")
+        if len(parts) < 2:
+            raise ValueError("Неверный формат")
+        
+        field = parts[0].strip()
+        value = parts[1].strip()
+        
+        # Извлекаем user_id из контекста (последний просмотренный)
+        if not user.last_text or not user.last_text.startswith("admin_edit_user_"):
+            raise ValueError("Не выбран пользователь")
+        
+        user_id = int(user.last_text.split("_")[3])
+        if user_id not in users_db:
+            raise ValueError("Пользователь не найден")
+        
+        target_user = users_db[user_id]
+        
+        if field == "stars":
+            target_user.stars = int(value)
+        elif field == "premium":
+            days = int(value)
+            if days > 0:
+                target_user.is_premium = True
+                target_user.premium_expiry = time.time() + days * 24 * 3600
+            else:
+                target_user.is_premium = False
+                target_user.premium_expiry = None
+        else:
+            raise ValueError("Неизвестное поле")
+        
+        target_user.mark_modified()
+        await save_db()
+        await message.answer(f"✅ Данные пользователя {user_id} обновлены")
+        await handle_admin_view_user(message, user, user_id)
+    except Exception as e:
+        await message.answer(f"❌ Ошибка: {str(e)}")
+
+async def process_admin_create_template(message: Message, text: str):
+    """Создание шаблона по команде админа"""
+    user = await get_user(message.from_user.id)
+    if user.user_id != ADMIN_ID:
+        return
+    
+    try:
+        template_data = json.loads(text)
+        required_fields = ["name", "description", "prompt", "example", "category"]
+        
+        if not all(field in template_data for field in required_fields):
+            raise ValueError("Отсутствуют обязательные поля")
+        
+        # Генерация ID
+        template_id = "T" + generate_random_id(5)
+        while template_id in templates:
+            template_id = "T" + generate_random_id(5)
+        
+        # Создание шаблона
+        template = Template(
+            id=template_id,
+            name=template_data["name"],
+            description=template_data["description"],
+            prompt=template_data["prompt"],
+            example=template_data["example"],
+            category=template_data["category"],
+            created_by=user.user_id,
+            created_at=datetime.datetime.now().isoformat()
+        )
+        
+        templates[template_id] = template
+        await save_db()
+        
+        await message.answer(f"✅ Шаблон создан: {template.name}")
+        user.state = UserState.ADMIN_PANEL
+        await show_menu(message, user)
+    except json.JSONDecodeError:
+        await message.answer("❌ Ошибка формата JSON")
+    except Exception as e:
+        await message.answer(f"❌ Ошибка: {str(e)}")
+        
 # ===================== КЛАВИАТУРЫ =====================
 def create_keyboard(
     buttons: List[Union[Tuple[str, str], List[Tuple[str, str]]]],
