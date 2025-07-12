@@ -71,7 +71,7 @@ MAX_MESSAGE_LENGTH = 4000
 SESSION_TIMEOUT = 2592000  # 30 дней
 DAILY_BONUS = 3
 SYSTEM_PROMPT = "Ты — полезный ИИ-ассистент. Отвечай точно и информативно."
-ADMIN_PASSWORD = os.getenv("ADMIN_PASS", "admin123")  # Пароль для доступа к админ-панели
+ADMIN_PASSWORD = os.getenv("ADMIN_PASS", "admin123")
 TEMPLATE_COST = 15
 MAX_TEMPLATE_LENGTH = 500
 
@@ -167,7 +167,8 @@ class UserState:
     ADMIN_EDIT_USER = "admin_edit_user"
     TEMPLATE_SELECT = "template_select"
     FEEDBACK = "feedback"
-    ACHIEVEMENTS_LIST = "achievements_list"  # Добавлено отсутствующее состояние
+    ACHIEVEMENTS_LIST = "achievements_list"
+    SETTINGS_MENU = "settings_menu"
 
 class GenerationModel(BaseModel):
     key: str
@@ -355,7 +356,6 @@ class User:
         self.achievements = {}
         self.settings = {
             "notifications": True,
-            "language": "ru",
             "auto_translate": False
         }
         self.last_feedback = None
@@ -445,7 +445,6 @@ class User:
         user.achievements = data.get("achievements", {})
         user.settings = data.get("settings", {
             "notifications": True,
-            "language": "ru",
             "auto_translate": False
         })
         user.last_feedback = data.get("last_feedback", None)
@@ -539,7 +538,6 @@ class User:
         return False
         
     def calculate_level(self) -> int:
-        # Простая формула: уровень = sqrt(XP/100) + 1
         return min(50, int((self.xp / 100) ** 0.5)) + 1
         
     def unlock_achievement(self, achievement_id: str) -> bool:
@@ -558,10 +556,8 @@ class User:
         return True
         
     def check_achievements(self):
-        # Проверяем достижения, которые могут быть разблокированы
         unlocked = []
         
-        # Достижения по количеству генераций
         if self.images_generated >= 10 and not self.achievements.get("image_master"):
             if self.unlock_achievement("image_master"):
                 unlocked.append("image_master")
@@ -570,10 +566,13 @@ class User:
             if self.unlock_achievement("text_master"):
                 unlocked.append("text_master")
                 
-        # Достижения по уровню
         if self.level >= 5 and not self.achievements.get("level_5"):
             if self.unlock_achievement("level_5"):
                 unlocked.append("level_5")
+                
+        if self.is_premium and not self.achievements.get("premium_user"):
+            if self.unlock_achievement("premium_user"):
+                unlocked.append("premium_user")
                 
         return unlocked
 
@@ -600,13 +599,11 @@ async def load_db():
                     
                     logger.info("Database loaded successfully")
         
-        # Загрузка промокодов
         if os.path.exists(PROMO_FILE):
             with open(PROMO_FILE, 'r', encoding='utf-8') as f:
                 promo_codes = json.load(f)
                 logger.info(f"Loaded {len(promo_codes)} promo codes")
                 
-        # Загрузка шаблонов
         if os.path.exists(TEMPLATES_FILE):
             with open(TEMPLATES_FILE, 'r', encoding='utf-8') as f:
                 templates_data = json.load(f)
@@ -614,7 +611,6 @@ async def load_db():
                     templates[t_id] = Template(**t_data)
                 logger.info(f"Loaded {len(templates)} templates")
                 
-        # Загрузка достижений
         if os.path.exists(ACHIEVEMENTS_FILE):
             with open(ACHIEVEMENTS_FILE, 'r', encoding='utf-8') as f:
                 achievements_data = json.load(f)
@@ -622,13 +618,11 @@ async def load_db():
                     achievements[a_id] = Achievement(**a_data)
                 logger.info(f"Loaded {len(achievements)} achievements")
                 
-        # Загрузка статистики
         if os.path.exists(STATS_FILE):
             with open(STATS_FILE, 'r', encoding='utf-8') as f:
                 bot_stats = json.load(f)
                 logger.info("Bot stats loaded")
                     
-        # Создаем пользователя для админа если его нет
         if ADMIN_ID not in users_db:
             admin_user = User(ADMIN_ID)
             admin_user.is_premium = True
@@ -646,11 +640,9 @@ async def load_db():
             admin_user.mark_modified()
             logger.info(f"Admin premium status set for {ADMIN_ID}")
             
-        # Создаем базовые достижения, если их нет
         if not achievements:
             create_default_achievements()
             
-        # Создаем базовые шаблоны, если их нет
         if not templates:
             create_default_templates()
             
@@ -673,21 +665,17 @@ async def save_db():
             with open(DB_FILE, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             
-            # Сохраняем промокоды
             with open(PROMO_FILE, 'w', encoding='utf-8') as f:
                 json.dump(promo_codes, f, ensure_ascii=False, indent=2)
                 
-            # Сохраняем шаблоны
             templates_data = {t_id: t.dict() for t_id, t in templates.items()}
             with open(TEMPLATES_FILE, 'w', encoding='utf-8') as f:
                 json.dump(templates_data, f, ensure_ascii=False, indent=2)
                 
-            # Сохраняем достижения
             achievements_data = {a_id: a.dict() for a_id, a in achievements.items()}
             with open(ACHIEVEMENTS_FILE, 'w', encoding='utf-8') as f:
                 json.dump(achievements_data, f, ensure_ascii=False, indent=2)
                 
-            # Сохраняем статистику
             with open(STATS_FILE, 'w', encoding='utf-8') as f:
                 json.dump(bot_stats, f, ensure_ascii=False, indent=2)
             
@@ -914,22 +902,21 @@ def count_words(text: str) -> int:
 
 def generate_random_id(length=8):
     return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
-# ===================== ФУНКЦИИ ДЛЯ ФОНОВЫХ ЗАДАЧ =====================
+
+# ===================== ФОНОВЫЕ ЗАДАЧИ =====================
 async def auto_save_db():
-    """Фоновая задача для автоматического сохранения базы данных"""
     while True:
         try:
-            await asyncio.sleep(300)  # Сохраняем каждые 5 минут
+            await asyncio.sleep(300)
             await save_db()
             logger.info("Auto-saved database")
         except Exception as e:
             logger.error(f"Auto-save error: {e}")
 
 async def self_pinger():
-    """Фоновая задача для поддержания активности приложения"""
     while True:
         try:
-            await asyncio.sleep(60)  # Пинг каждую минуту
+            await asyncio.sleep(60)
             async with aiohttp.ClientSession() as session:
                 async with session.get("https://your-app-url.onrender.com/"):
                     pass
@@ -939,7 +926,6 @@ async def self_pinger():
 
 # ===================== ПРОВЕРКА ПОДПИСКИ =====================
 async def check_subscription(user_id: int) -> bool:
-    """Проверяет, подписан ли пользователь на канал"""
     try:
         chat_member = await bot.get_chat_member(CHANNEL_ID, user_id)
         return chat_member.status in [
@@ -952,7 +938,6 @@ async def check_subscription(user_id: int) -> bool:
         return False
 
 async def ensure_subscription(update: Union[Message, CallbackQuery], user: User) -> bool:
-    """Обеспечивает, что пользователь подписан на канал"""
     if user.has_subscribed:
         return True
     
@@ -1019,7 +1004,6 @@ async def process_successful_payment(message: Message):
         await message.answer("❌ Неизвестный товар, обратитесь в поддержку")
 
 async def process_referral(user: User, ref_code: str):
-    """Обрабатывает реферальный код"""
     if user.referral_used:
         return
     
@@ -1052,26 +1036,22 @@ async def process_referral(user: User, ref_code: str):
         await save_db()
 
 async def process_promo_code(user: User, promo_code: str, message: Message):
-    """Активирует промокод для пользователя"""
     promo_data = promo_codes.get(promo_code.upper())
     
     if not promo_data or not promo_data.get("active", True):
         await message.answer("❌ Неверный или неактивный промокод")
         return
     
-    # Проверка лимита использования
     used_count = promo_data.get("used_count", 0)
     if "limit" in promo_data and used_count >= promo_data["limit"]:
         await message.answer("❌ Лимит использования промокода исчерпан")
         return
     
-    # Проверка, не использовал ли пользователь уже этот промокод
     if "used_by" in promo_data:
         if any(entry["user_id"] == user.user_id for entry in promo_data["used_by"]):
             await message.answer("ℹ️ Вы уже активировали этот промокод")
             return
     
-    # Активация промокода
     promo_type = promo_data["type"]
     value = promo_data["value"]
     
@@ -1090,7 +1070,6 @@ async def process_promo_code(user: User, promo_code: str, message: Message):
             user.premium_expiry = expiry
             text = f"💎 Активирован премиум доступ на {days} дней!"
     
-    # Обновление данных промокода
     promo_data["used_count"] = used_count + 1
     if "used_by" not in promo_data:
         promo_data["used_by"] = []
@@ -1103,13 +1082,11 @@ async def process_promo_code(user: User, promo_code: str, message: Message):
     promo_codes[promo_code.upper()] = promo_data
     user.mark_modified()
     
-    # Сохранение и уведомление
     await save_db()
     await message.answer(text + "\n" + format_balance(user), reply_markup=main_keyboard(user))
 
 # ===================== АДМИН-ФУНКЦИИ =====================
 async def process_admin_command(message: Message):
-    """Обработчик команды /admin"""
     user = await get_user(message.from_user.id)
     if user.user_id != ADMIN_ID:
         return
@@ -1122,7 +1099,6 @@ async def process_admin_command(message: Message):
         await message.answer("🔒 Введите пароль админа:")
 
 async def process_promo_creation(message: Message):
-    """Создание промокода по команде админа"""
     user = await get_user(message.from_user.id)
     if user.user_id != ADMIN_ID:
         return
@@ -1139,12 +1115,10 @@ async def process_promo_creation(message: Message):
         if promo_type not in ["stars", "premium"]:
             raise ValueError("Неверный тип промокода")
         
-        # Генерация уникального кода
         promo_code = "PROMO" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
         while promo_code in promo_codes:
             promo_code = "PROMO" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
         
-        # Создание промокода
         promo_codes[promo_code] = {
             "type": promo_type,
             "value": value,
@@ -1155,7 +1129,6 @@ async def process_promo_creation(message: Message):
             "used_count": 0
         }
         
-        # Сохранение
         with open(PROMO_FILE, 'w', encoding='utf-8') as f:
             json.dump(promo_codes, f, ensure_ascii=False, indent=2)
         
@@ -1166,7 +1139,6 @@ async def process_promo_creation(message: Message):
         await message.answer(f"❌ Ошибка: {str(e)}")
 
 async def process_broadcast_message(message: Message):
-    """Обработка сообщения для рассылки"""
     user = await get_user(message.from_user.id)
     if user.user_id != ADMIN_ID:
         return
@@ -1182,7 +1154,6 @@ async def process_broadcast_message(message: Message):
     )
 
 async def execute_broadcast(admin_id: int):
-    """Выполняет рассылку сообщения"""
     if admin_id not in admin_broadcast_data or admin_broadcast_data[admin_id] == "CANCEL":
         return
     
@@ -1212,7 +1183,6 @@ async def execute_broadcast(admin_id: int):
     )
 
 async def process_admin_search_user(message: Message, text: str):
-    """Поиск пользователя по ID"""
     user = await get_user(message.from_user.id)
     if user.user_id != ADMIN_ID:
         return
@@ -1229,7 +1199,6 @@ async def process_admin_search_user(message: Message, text: str):
         await message.answer("❌ Неверный формат ID")
 
 async def process_admin_edit_user(message: Message, text: str):
-    """Редактирование данных пользователя"""
     user = await get_user(message.from_user.id)
     if user.user_id != ADMIN_ID:
         return
@@ -1242,7 +1211,6 @@ async def process_admin_edit_user(message: Message, text: str):
         field = parts[0].strip()
         value = parts[1].strip()
         
-        # Извлекаем user_id из контекста (последний просмотренный)
         if not user.last_text or not user.last_text.startswith("admin_edit_user_"):
             raise ValueError("Не выбран пользователь")
         
@@ -1273,7 +1241,6 @@ async def process_admin_edit_user(message: Message, text: str):
         await message.answer(f"❌ Ошибка: {str(e)}")
 
 async def process_admin_create_template(message: Message, text: str):
-    """Создание шаблона по команде админа"""
     user = await get_user(message.from_user.id)
     if user.user_id != ADMIN_ID:
         return
@@ -1285,12 +1252,10 @@ async def process_admin_create_template(message: Message, text: str):
         if not all(field in template_data for field in required_fields):
             raise ValueError("Отсутствуют обязательные поля")
         
-        # Генерация ID
         template_id = "T" + generate_random_id(5)
         while template_id in templates:
             template_id = "T" + generate_random_id(5)
         
-        # Создание шаблона
         template = Template(
             id=template_id,
             name=template_data["name"],
@@ -1608,12 +1573,10 @@ def achievement_detail_keyboard() -> InlineKeyboardMarkup:
 
 def settings_menu_keyboard(user: User) -> InlineKeyboardMarkup:
     notifications = "🔔 Уведомления: Вкл" if user.settings["notifications"] else "🔕 Уведомления: Выкл"
-    language = "🌐 Русский" if user.settings["language"] == "ru" else "🌐 English"
     auto_translate = "🔄 Автоперевод: Вкл" if user.settings["auto_translate"] else "🔄 Автоперевод: Выкл"
     
     buttons = [
         [(notifications, "toggle_notifications")],
-        [(language, "toggle_language")],
         [(auto_translate, "toggle_auto_translate")],
         [("🔙 Назад", "profile_menu")]
     ]
@@ -1931,7 +1894,8 @@ async def show_menu(callback: CallbackQuery, user: User):
         UserState.ADMIN_VIEW_USER: handle_admin_view_user,
         UserState.TEMPLATE_SELECT: handle_template_select,
         UserState.FEEDBACK: handle_feedback,
-        UserState.ACHIEVEMENTS_LIST: handle_achievements_list  # Добавлен обработчик
+        UserState.ACHIEVEMENTS_LIST: handle_achievements_list,
+        UserState.SETTINGS_MENU: handle_settings_menu
     }
     
     handler = menu_handlers.get(user.state)
@@ -1999,7 +1963,6 @@ async def handle_image_count_select(callback: CallbackQuery, user: User):
         reply_markup=image_count_keyboard()
     )
 
-# Добавленные обработчики для аватаров и логотипов
 async def handle_avatar_gen(callback: CallbackQuery, user: User):
     model = IMAGE_MODELS[user.image_model]
     base_cost = int(AVATAR_COST * model.cost_multiplier)
@@ -2041,7 +2004,6 @@ async def handle_logo_gen(callback: CallbackQuery, user: User):
     )
 
 async def handle_template_gen(callback: CallbackQuery, user: User):
-    # Реализация аналогична handle_image_gen
     await safe_edit_message(
         callback,
         "📋 <b>Генерация по шаблону</b>\n"
@@ -2101,7 +2063,6 @@ async def handle_balance(callback: CallbackQuery, user: User):
 async def handle_image_model_select(callback: CallbackQuery, user: User):
     text = "🤖 <b>Выберите модель для генерации изображений</b>\n══════════════════\n"
     
-    # Создаем список доступных моделей
     model_list = []
     for key, model in IMAGE_MODELS.items():
         selected = " ✅" if user.image_model == key else ""
@@ -2127,7 +2088,6 @@ async def handle_model_select(callback: CallbackQuery, user: User):
 async def handle_text_model_select(callback: CallbackQuery, user: User):
     text = "🤖 <b>Выберите модель для генерации текста</b>\n══════════════════\n"
     
-    # Создаем список доступных моделей с учетом премиум статуса
     model_list = []
     for key, model in TEXT_MODELS.items():
         if model.premium_only and not user.is_premium:
@@ -2138,7 +2098,6 @@ async def handle_text_model_select(callback: CallbackQuery, user: User):
     
     text += "\n".join(model_list)
     
-    # Добавляем информацию о премиум моделях
     if any(model.premium_only for model in TEXT_MODELS.values()):
         text += "\n\n🔒 Премиум-модели доступны только с подпиской"
     
@@ -2169,7 +2128,6 @@ async def handle_admin_create_promo(callback: CallbackQuery, user: User):
     )
 
 async def handle_admin_stats(callback: CallbackQuery, user: User):
-    # Обновляем статистику активных пользователей
     bot_stats["active_today"] = sum(
         1 for u in users_db.values() 
         if time.time() - u.last_interaction < 86400
@@ -2270,7 +2228,6 @@ async def handle_template_select(callback: CallbackQuery, user: User):
     )
 
 async def handle_feedback(callback: CallbackQuery, user: User):
-    # Реализация будет добавлена позже
     pass
 
 async def handle_achievements_list(callback: CallbackQuery, user: User):
@@ -2283,6 +2240,15 @@ async def handle_achievements_list(callback: CallbackQuery, user: User):
         callback,
         text,
         reply_markup=achievements_list_keyboard(user)
+    )
+
+async def handle_settings_menu(callback: CallbackQuery, user: User):
+    await safe_edit_message(
+        callback,
+        "⚙️ <b>НАСТРОЙКИ</b>\n"
+        "══════════════════\n"
+        "Выберите параметр для изменения:",
+        reply_markup=settings_menu_keyboard(user)
     )
 
 # ===================== ОБРАБОТКА КОМАНД =====================
@@ -2532,7 +2498,6 @@ async def set_image_model(callback: CallbackQuery):
         model_name = IMAGE_MODELS[model_key].name
         await callback.answer(f"✅ Выбрана модель: {model_name}")
         
-        # Возвращаемся в меню выбора моделей
         user.state = UserState.MODEL_SELECT
         user.mark_modified()
         await show_menu(callback, user)
@@ -2562,7 +2527,6 @@ async def set_text_model(callback: CallbackQuery):
     user.mark_modified()
     await callback.answer(f"✅ Выбрана модель: {model.name}")
     
-    # Возвращаемся в меню выбора моделей
     user.state = UserState.MODEL_SELECT
     user.mark_modified()
     await show_menu(callback, user)
@@ -2665,7 +2629,6 @@ async def process_buy(callback: CallbackQuery):
     if not await ensure_subscription(callback, user):
         return
     
-    # Исправлено: объединяем все части после первого подчеркивания
     item = '_'.join(callback.data.split('_')[1:])
     
     items = {
@@ -2921,7 +2884,6 @@ async def clear_context(callback: CallbackQuery):
     user.clear_context()
     await callback.answer("🧹 Контекст очищен!", show_alert=True)
     
-    # Обновляем сообщение
     text = (
         "📝 <b>Контекст очищен</b>\n"
         "══════════════════\n"
@@ -2999,11 +2961,9 @@ async def promo_toggle_handler(callback: CallbackQuery):
         await callback.answer("❌ Промокод не найден", show_alert=True)
         return
     
-    # Переключаем статус
     promo_data["active"] = not promo_data.get("active", True)
     promo_codes[promo_code] = promo_data
     
-    # Сохраняем
     with open(PROMO_FILE, 'w', encoding='utf-8') as f:
         json.dump(promo_codes, f, ensure_ascii=False, indent=2)
     
@@ -3225,7 +3185,7 @@ async def user_template_select_detail(callback: CallbackQuery):
     user.push_menu(user.state, {})
     user.state = UserState.TEMPLATE_GEN
     user.mark_modified()
-    # Здесь будет вызов функции генерации по шаблону
+    await callback.message.answer(f"📋 <b>Шаблон: {template.name}</b>\n══════════════════\n{template.description}\n\nВведите данные для шаблона:")
 
 @dp.callback_query(F.data.startswith("use_template_"))
 async def use_template(callback: CallbackQuery):
@@ -3241,8 +3201,9 @@ async def use_template(callback: CallbackQuery):
         
     user.push_menu(user.state, {})
     user.state = UserState.TEMPLATE_GEN
+    user.last_text = template_id
     user.mark_modified()
-    # Здесь будет вызов функции генерации по шаблону
+    await callback.message.answer(f"📋 <b>Шаблон: {template.name}</b>\n══════════════════\n{template.description}\n\nВведите данные для шаблона:")
 
 @dp.callback_query(F.data == "achievements_list")
 async def achievements_list(callback: CallbackQuery):
@@ -3309,18 +3270,6 @@ async def toggle_notifications(callback: CallbackQuery):
     await callback.answer(f"🔔 Уведомления {status}", show_alert=True)
     await settings_menu(callback)
 
-@dp.callback_query(F.data == "toggle_language")
-async def toggle_language(callback: CallbackQuery):
-    user = await get_user(callback.from_user.id)
-    if not await ensure_subscription(callback, user):
-        return
-    
-    user.settings["language"] = "en" if user.settings["language"] == "ru" else "ru"
-    user.mark_modified()
-    lang = "Русский" if user.settings["language"] == "ru" else "English"
-    await callback.answer(f"🌐 Язык изменен на {lang}", show_alert=True)
-    await settings_menu(callback)
-
 @dp.callback_query(F.data == "toggle_auto_translate")
 async def toggle_auto_translate(callback: CallbackQuery):
     user = await get_user(callback.from_user.id)
@@ -3350,14 +3299,12 @@ async def process_feedback(callback: CallbackQuery):
     user.feedback_count += 1
     user.last_feedback = datetime.datetime.now().isoformat()
     
-    # Награда за фидбек
     reward = min(5, rating)
     user.stars += reward
     user.add_xp(reward)
     
     await callback.answer(f"⭐ Спасибо за оценку! +{reward} ⭐", show_alert=True)
     
-    # Возвращаемся в главное меню
     user.state = UserState.MAIN_MENU
     user.menu_stack = []
     await show_menu(callback, user)
@@ -3373,7 +3320,6 @@ async def send_welcome(message: Message):
     
     ref_code = args[1] if len(args) > 1 else None
     
-    # Обработка реферального кода
     if ref_code and ref_code.startswith("REF"):
         if user.has_subscribed:
             await process_referral(user, ref_code)
@@ -3381,7 +3327,6 @@ async def send_welcome(message: Message):
             user.pending_referral = ref_code
             user.mark_modified()
     
-    # Проверка подписки
     if not user.has_subscribed:
         if await check_subscription(user.user_id):
             user.has_subscribed = True
@@ -3396,7 +3341,6 @@ async def send_welcome(message: Message):
             )
             return
     
-    # Обработка реферального кода после подписки
     if ref_code and ref_code.startswith("REF") and not user.referral_used:
         await process_referral(user, ref_code)
     
@@ -3485,7 +3429,7 @@ async def handle_message(message: Message):
         elif user.state == UserState.ADMIN_BROADCAST:
             await process_broadcast_message(message)
             
-        elif user.state == UserState.ADMIN_SEARCH_USER:
+        elif user.state == UserState.ADMIN_USER_MANAGEMENT:
             await process_admin_search_user(message, text)
             
         elif user.state == UserState.ADMIN_EDIT_USER:
@@ -3533,8 +3477,8 @@ async def generate_content(
         
         processing_msg = await animate_loading(message, f"🪄 Генерирую {content_type}...")
         
-        # Автоперевод при необходимости
-        if user.settings["auto_translate"] and detect_language(text) != 'en':
+        # Автоматический перевод на английский для изображений/аватаров/логотипов
+        if detect_language(text) != 'en':
             translated_prompt = await translate_to_english(text)
             logger.info(f"Translated: {text} -> {translated_prompt}")
         else:
@@ -3555,7 +3499,6 @@ async def generate_content(
             )
             return
         
-        # Для премиум-пользователей с несколькими изображениями
         if content_type == "image" and user.is_premium and user.image_count > 1:
             count = min(user.image_count, MAX_IMAGE_COUNT)
             images = []
@@ -3566,7 +3509,6 @@ async def generate_content(
                 image_url = f"{IMAGE_URL}{encoded_prompt}?nologo=true"
                 images.append(image_url)
             
-            # Создаем медиагруппу
             media_group = []
             for i, img_url in enumerate(images):
                 if i == 0:
@@ -3591,13 +3533,12 @@ async def generate_content(
             bot_stats["images_generated"] += count
             IMAGES_GENERATED.inc(count)
             
-            # Отправляем клавиатуру отдельным сообщением
             await sent_messages[-1].answer(
                 f"✅ {content_type.capitalize()} готовы!",
                 reply_markup=options_keyboard
             )
         
-        else:  # Одно изображение
+        else:
             encoded_prompt = urllib.parse.quote(enhanced_prompt)
             image_url = f"{IMAGE_URL}{encoded_prompt}?nologo=true"
             
@@ -3621,7 +3562,6 @@ async def generate_content(
             )
             setattr(user, url_field, result.photo[-1].file_id)
             
-            # Обновляем счетчики
             if content_type == "image":
                 user.images_generated += 1
                 bot_stats["images_generated"] += 1
@@ -3639,10 +3579,8 @@ async def generate_content(
             
             await animate_success(message, f"✅ {content_type.capitalize()} готов!")
         
-        # Начисление опыта
         user.add_xp(3)
         
-        # Проверка достижений
         unlocked = user.check_achievements()
         if unlocked:
             for achievement_id in unlocked:
@@ -3696,7 +3634,6 @@ async def generate_text(user: User, text: str, message: Message):
         
         processing_msg = await animate_loading(message, "🧠 Обрабатываю запрос...")
         
-        # Инициализация контекста для премиум-пользователей
         if user.is_premium and not user.context:
             user.context = [
                 {"role": "system", "content": SYSTEM_PROMPT}
@@ -3719,7 +3656,6 @@ async def generate_text(user: User, text: str, message: Message):
         if not result:
             raise Exception("Ошибка сервера генерации")
         
-        # Форматируем с очисткой HTML
         formatted_result = format_code_blocks(result)
         
         input_words = count_words(text)
@@ -3743,24 +3679,19 @@ async def generate_text(user: User, text: str, message: Message):
             user.stars -= cost
             user.mark_modified()
         elif user.is_premium:
-            # Добавляем ответ ассистента в контекст
             user.add_context("assistant", result)
         
-        # Обновляем счетчики
         user.texts_generated += 1
         bot_stats["texts_generated"] += 1
         TEXTS_GENERATED.inc()
         
         await processing_msg.delete()
         
-        # Разделяем сообщение на части
         messages = split_message(f"📝 <b>Результат:</b>\n══════════════════\n\n{formatted_result}")
         
-        # Отправляем все части, кроме последней
         for msg_text in messages[:-1]:
             await message.answer(msg_text, parse_mode="HTML")
         
-        # Отправляем последнюю часть
         last_msg = await message.answer(messages[-1], parse_mode="HTML")
         
         stats_text = f"✅ <b>Готово!</b>\n══════════════════\n"
@@ -3781,10 +3712,8 @@ async def generate_text(user: User, text: str, message: Message):
         
         await animate_success(message, "✅ Текст готов!")
         
-        # Начисление опыта
         user.add_xp(5)
         
-        # Проверка достижений
         unlocked = user.check_achievements()
         if unlocked:
             for achievement_id in unlocked:
@@ -3800,7 +3729,6 @@ async def generate_text(user: User, text: str, message: Message):
         
     except TelegramBadRequest as e:
         logger.error(f"HTML formatting error: {e}")
-        # Пытаемся отправить без форматирования
         await processing_msg.delete()
         await message.answer("⚠️ Ошибка форматирования, отправляю текст без оформления:")
         await message.answer(result[:4000])
@@ -3833,17 +3761,14 @@ async def process_template_generation(user: User, text: str, message: Message):
             await animate_error(message, f"⚠️ Превышен лимит {MAX_TEMPLATE_LENGTH} символов")
             return
             
-        # Получаем шаблон из контекста
         template_id = user.last_text
         template = templates.get(template_id)
         if not template:
             await animate_error(message, "❌ Шаблон не найден")
             return
             
-        # Формируем промпт
         full_prompt = template.prompt.format(data=text)
         
-        # Определяем тип генерации
         if template.category == "Изображение":
             user.last_image_prompt = full_prompt
             await generate_content(
@@ -3856,7 +3781,6 @@ async def process_template_generation(user: User, text: str, message: Message):
             user.last_text = full_prompt
             await generate_text(user, full_prompt, message)
         
-        # Обновляем статистику использования шаблона
         template.usage_count += 1
         user.templates_used += 1
         bot_stats["templates_used"] += 1
@@ -3880,42 +3804,31 @@ from contextlib import asynccontextmanager
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Управление жизненным циклом приложения"""
-    # Загрузка данных при старте
     await load_db()
     
-    # Инициализация бота
     bot_info = await bot.get_me()
     global BOT_USERNAME
     BOT_USERNAME = bot_info.username
     logger.info(f"Bot @{BOT_USERNAME} started")
     
-    # Фоновые задачи
     asyncio.create_task(auto_save_db())
     asyncio.create_task(self_pinger())
     
-    # Очистка предыдущих обновлений
     await bot.delete_webhook(drop_pending_updates=True)
-    
-    # Запуск бота в фоне
     asyncio.create_task(dp.start_polling(bot, skip_updates=True))
     
     yield
     
-    # Остановка при завершении
     await save_db()
     await bot.session.close()
 
 app = FastAPI(lifespan=lifespan)
 
-# ===================== ENDPOINT ДЛЯ ПРОВЕРКИ =====================
 @app.api_route("/", methods=["GET", "HEAD", "POST"])
 async def health_check(request: Request):
-    # Для HEAD-запросов возвращаем только статус
     if request.method == "HEAD":
         return Response(status_code=200)
     
-    # Для GET/POST возвращаем полную информацию
     return JSONResponse(content={
         "status": "active",
         "service": "AI Content Generator Bot",
@@ -3932,7 +3845,6 @@ async def health_check(request: Request):
 
 @app.get("/metrics")
 async def metrics():
-    # Обновляем значения метрик
     USERS_TOTAL.set(len(users_db))
     ACTIVE_USERS.set(bot_stats["active_today"])
     
