@@ -539,7 +539,7 @@ class User:
         
     def calculate_level(self) -> int:
         # Простая формула: уровень = sqrt(XP/100) + 1
-        return min(50, int((self.xp / 100) ** 0.5) + 1
+        return min(50, int((self.xp / 100) ** 0.5) )+ 1
         
     def unlock_achievement(self, achievement_id: str) -> bool:
         if achievement_id in self.achievements:
