@@ -162,6 +162,7 @@ class UserState:
     ADMIN_PROMO_LIST = "admin_promo_list"
     ADMIN_USER_MANAGEMENT = "admin_user_management"
     ADMIN_TEMPLATE_MANAGEMENT = "admin_template_management"
+    ADMIN_CREATE_TEMPLATE = "admin_create_template"  # Добавленная строка
     ADMIN_VIEW_USER = "admin_view_user"
     ADMIN_EDIT_USER = "admin_edit_user"
     TEMPLATE_SELECT = "template_select"
